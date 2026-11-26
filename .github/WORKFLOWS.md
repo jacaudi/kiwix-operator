@@ -62,3 +62,13 @@ task test        # go test -race
 task test:kiwix  # kiwix-tagged tests in docker (slow)
 IMAGE=ghcr.io/jacaudi/kiwix-operator:sha-abc1234 task smoke
 ```
+
+## The e2e is not in `ci`
+
+The `ci` check does not run the kind end-to-end tests (`test/e2e`, build tag `e2e`), so a green `ci` says nothing about them. Run them yourself before a release or a change to the chart, the controllers or the librarian:
+
+```bash
+task e2e         # needs docker, kind and helm; slow (up to 45 minutes)
+```
+
+`task e2e` builds the operator image, creates a throwaway kind cluster with its own kubeconfig (`/tmp/kiwix-e2e.kubeconfig`), installs the chart and deletes the cluster afterwards. It never touches your default kube context.
