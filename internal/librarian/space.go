@@ -26,7 +26,11 @@ func (a *Attempts) checkSpace(need int64) error {
 	if err != nil {
 		return fmt.Errorf("measure free space: %w", err)
 	}
-	if free < need+a.Reserve {
+	if need < 0 {
+		return fmt.Errorf("%d bytes needed: %w", need, ErrInvalid)
+	}
+	// Compared as free-Reserve, which cannot overflow, rather than need+Reserve, which can.
+	if free-a.Reserve < need {
 		return fmt.Errorf("%d bytes free, %d needed plus the %d-byte reserve: %w", free, need, a.Reserve, ErrInsufficientSpace)
 	}
 	return nil
