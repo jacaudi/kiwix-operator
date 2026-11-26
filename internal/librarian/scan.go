@@ -73,6 +73,11 @@ func bookFor(ctx context.Context, r BookReader, m *Manifest, path, id string) (B
 	if book, ok := m.Books[filepath.Base(path)]; ok && book.BookID == id {
 		return book, nil
 	}
+	return readBook(ctx, r, path, id)
+}
+
+// readBook runs the reader on path and requires it to agree with id, the book ID in the file's header.
+func readBook(ctx context.Context, r BookReader, path, id string) (Book, error) {
 	book, err := r.Read(ctx, path)
 	if err != nil {
 		return Book{}, err

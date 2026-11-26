@@ -30,6 +30,7 @@ const (
 	CodeDuplicateBook     = "DuplicateBook"
 	CodeInsufficientSpace = "InsufficientSpace"
 	CodeHashMismatch      = "HashMismatch"
+	CodeInvalidZim        = "InvalidZim"
 	CodeAdoptFileMissing  = "AdoptFileMissing"
 	CodeAdoptFileInvalid  = "AdoptFileInvalid"
 	CodeInternal          = "Internal"

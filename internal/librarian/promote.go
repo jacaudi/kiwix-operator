@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/jacaudi/kiwix-operator/api/v1alpha1"
 	"github.com/jacaudi/kiwix-operator/internal/libapi"
@@ -53,6 +54,10 @@ type Store struct {
 	R       BookReader
 	// OnTerminal, when set, is called with each attempt that became promoted, discarded or failed, after mu is released.
 	OnTerminal func(attempt string)
+	// Now stamps each attempt change; nil means time.Now.
+	Now func() time.Time
+	// Free measures the free bytes of the filesystem holding a directory; nil means FreeBytes.
+	Free func(dir string) (int64, error)
 
 	mu          sync.Mutex
 	unconfirmed bool
@@ -60,7 +65,7 @@ type Store struct {
 	snap        atomic.Pointer[Snapshot]
 }
 
-// Snapshot is an immutable copy of what the read endpoints serve, published after every manifest change; it shares nothing with the manifest. Library.FreeBytes is left to the caller, which reads it live.
+// Snapshot is an immutable copy of what the read endpoints serve, published after every manifest change; it shares nothing with the manifest. Library.FreeBytes is measured at publish time.
 type Snapshot struct {
 	Archives map[string]libapi.BookInfo
 	Attempts map[string]libapi.AttemptState
@@ -449,7 +454,7 @@ func (s *Store) setState(attempt, state, code, msg string) (terminal []string) {
 		return nil
 	}
 	was := terminalState(rec.State)
-	rec.State, rec.Code, rec.Error = state, code, msg
+	rec.State, rec.Code, rec.Error, rec.UpdatedAt = state, code, msg, s.now()
 	s.M.Attempts[attempt] = rec
 	if !was && terminalState(state) {
 		return []string{attempt}
@@ -495,6 +500,10 @@ func (s *Store) publish() {
 			ReloadUnconfirmed: s.unconfirmed,
 		},
 	}
+	// A failed measurement reports 0 rather than failing the change it publishes.
+	if free, err := s.freeBytes(); err == nil {
+		snap.Library.FreeBytes = free
+	}
 	for archive := range s.M.Archives {
 		snap.Archives[archive] = s.info(archive)
 	}
@@ -517,6 +526,23 @@ func (s *Store) publish() {
 		snap.Attempts[id] = st
 	}
 	s.snap.Store(snap)
+}
+
+// attempt returns the attempt's state from the snapshot the caller, holding mu, just published.
+func (s *Store) attempt(id string) libapi.AttemptState { return s.snap.Load().Attempts[id] }
+
+func (s *Store) now() time.Time {
+	if s.Now == nil {
+		return time.Now()
+	}
+	return s.Now()
+}
+
+func (s *Store) freeBytes() (int64, error) {
+	if s.Free == nil {
+		return FreeBytes(s.DataDir)
+	}
+	return s.Free(s.DataDir)
 }
 
 func (s *Store) info(archive string) libapi.BookInfo {
