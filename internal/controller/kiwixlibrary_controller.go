@@ -115,8 +115,8 @@ func (r *KiwixLibraryReconciler) Reconcile(ctx context.Context, req ctrl.Request
 func (r *KiwixLibraryReconciler) apply(ctx context.Context, lib *v1alpha1.KiwixLibrary, obj client.Object, owned bool, mutate func() error) error {
 	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, obj, func() error {
 		// An existing object is only updated if the operator made it for this library; a same-named object of anyone else is left as it is.
-		if owned && obj.GetResourceVersion() != "" && !metav1.IsControlledBy(obj, lib) {
-			return errors.New("it exists and is not controlled by this KiwixLibrary")
+		if obj.GetResourceVersion() != "" && !madeForLibrary(lib, obj, owned) {
+			return errors.New("it exists and was not made by the operator for this KiwixLibrary")
 		}
 		labels := obj.GetLabels()
 		if labels == nil {
@@ -136,6 +136,15 @@ func (r *KiwixLibraryReconciler) apply(ctx context.Context, lib *v1alpha1.KiwixL
 		return fmt.Errorf("apply %T %s/%s: %w", obj, lib.Namespace, obj.GetName(), err)
 	}
 	return nil
+}
+
+// madeForLibrary reports whether the existing obj was made by the operator for lib: lib controls it, or, for an object that is never owned, it carries lib's instance label and the managed-by label.
+func madeForLibrary(lib *v1alpha1.KiwixLibrary, obj client.Object, owned bool) bool {
+	if owned {
+		return metav1.IsControlledBy(obj, lib)
+	}
+	l := obj.GetLabels()
+	return l[v1alpha1.LabelManagedBy] == v1alpha1.ManagedByValue && l[labelInstance] == lib.Name
 }
 
 // deleteOwned deletes obj if it exists and lib controls it.

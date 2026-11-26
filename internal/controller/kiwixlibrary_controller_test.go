@@ -734,3 +734,22 @@ func TestReconcileLeavesForeignObjectsAlone(t *testing.T) {
 		})
 	}
 }
+
+func TestReconcileLeavesForeignClaimAlone(t *testing.T) {
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "wiki-data", Namespace: "kiwix", Labels: map[string]string{"app": "other"}},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+			Resources:   corev1.VolumeResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("1Gi")}},
+		},
+	}
+	h := newHarness(t, testLib(), pvc)
+
+	_, err := h.r.Reconcile(t.Context(), ctrl.Request{NamespacedName: key("wiki")})
+
+	require.Error(t, err, "a claim the operator did not create must not be taken over")
+	var got corev1.PersistentVolumeClaim
+	h.get(t, "wiki-data", &got)
+	assert.Equal(t, map[string]string{"app": "other"}, got.Labels)
+	h.absent(t, "wiki", &appsv1.Deployment{})
+}
