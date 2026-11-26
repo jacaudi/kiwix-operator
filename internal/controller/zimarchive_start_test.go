@@ -818,3 +818,24 @@ func TestQueuedCatalogArchiveSkipsCatalogLookup(t *testing.T) {
 	assertArchiveCondition(t, h.archive(t, "docs"), v1alpha1.ConditionProgressing, metav1.ConditionTrue, v1alpha1.ReasonQueued)
 	assert.Zero(t, h.catalog.count(), "a queued archive must not query the catalog")
 }
+
+func TestDueInputAwaitsAdoption(t *testing.T) {
+	withCur := adoptingArchive("docs")
+	withCur.Status.Current = &v1alpha1.CurrentVersion{BookID: testBookID}
+	tests := []struct {
+		name string
+		za   *v1alpha1.ZimArchive
+		want bool
+	}{
+		{name: "adoptFile and no current", za: adoptingArchive("docs"), want: true},
+		{name: "adoptFile and a current", za: withCur, want: false},
+		{name: "no adoptFile", za: catalogArchive("x", "maxi"), want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := dueInput(tt.za).AwaitingAdoption
+
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}

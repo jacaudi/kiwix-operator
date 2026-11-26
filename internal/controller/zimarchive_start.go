@@ -224,6 +224,7 @@ func (r *ZimArchiveReconciler) notify(ctx context.Context, za *v1alpha1.ZimArchi
 func dueInput(za *v1alpha1.ZimArchive) schedule.DueInput {
 	in := schedule.DueInput{
 		HasCurrent:             za.Status.Current != nil,
+		AwaitingAdoption:       za.Spec.AdoptFile != "" && za.Status.Current == nil,
 		FailedAttempts:         za.Status.FailedAttempts,
 		CreatedAt:              za.CreationTimestamp.Time,
 		Schedule:               za.Spec.Refresh.Schedule,
