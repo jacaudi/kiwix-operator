@@ -167,7 +167,7 @@ func (a *Attempts) beginPart(attempt, part, token, declaredSHA string, length in
 	if err := a.checkSpace(length); err != nil {
 		return "", st, fmt.Errorf("part %s of %s: %w", part, attempt, err)
 	}
-	partial = s.stagedPath(attempt, "."+part+partialExt)
+	partial = s.partialPath(attempt, part)
 	if err := os.MkdirAll(filepath.Dir(partial), 0o750); err != nil {
 		return "", st, fmt.Errorf("create %s: %w", filepath.Dir(partial), err)
 	}
@@ -290,6 +290,11 @@ func (s *Store) placePart(attempt, part, src string) error {
 		return fmt.Errorf("move %s to %s: %w", src, dst, err)
 	}
 	return syncDir(filepath.Dir(dst))
+}
+
+// partialPath is where a part is written while it arrives: staged/<attempt>.<part>.part.
+func (s *Store) partialPath(attempt, part string) string {
+	return s.stagedPath(attempt, "."+part+partialExt)
 }
 
 // ResetReceiving sends every upload attempt that was receiving when the librarian stopped back to registered and deletes its partial file; fetch attempts keep theirs to resume. Call it at startup, before serving.
