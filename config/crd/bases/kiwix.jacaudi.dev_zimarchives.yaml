@@ -434,6 +434,10 @@ spec:
                       attempt
                     format: date-time
                     type: string
+                  sourceVersion:
+                    description: SourceVersion is the catalog version a catalog fetch
+                      downloads, as YYYY-MM
+                    type: string
                   startedAt:
                     description: StartedAt is when the attempt began
                     format: date-time

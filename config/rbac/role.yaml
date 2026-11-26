@@ -17,7 +17,6 @@ rules:
   - ""
   resources:
   - persistentvolumeclaims
-  - secrets
   - services
   verbs:
   - create
@@ -32,6 +31,17 @@ rules:
   verbs:
   - get
   - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - update
   - watch
 - apiGroups:
   - apps
@@ -81,7 +91,6 @@ rules:
   - kiwix.jacaudi.dev
   resources:
   - kiwixlibraries
-  - zimarchives
   verbs:
   - get
   - list
@@ -101,6 +110,15 @@ rules:
   verbs:
   - get
   - update
+- apiGroups:
+  - kiwix.jacaudi.dev
+  resources:
+  - zimarchives
+  verbs:
+  - get
+  - list
+  - update
+  - watch
 - apiGroups:
   - networking.k8s.io
   resources:

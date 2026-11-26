@@ -114,12 +114,20 @@ func (r *ZimArchiveReconciler) mirror(ctx context.Context, za *v1alpha1.ZimArchi
 		// An inherited book was not promoted by this archive, so it has no promotedAt.
 		za.Status.Current = currentFrom(*book)
 	}
-	if za.Status.Current == nil {
-		setArchiveCondition(za, v1alpha1.ConditionAvailable, metav1.ConditionFalse, v1alpha1.ReasonNotYetFetched, "no version in the library yet")
-		return nil
-	}
-	setArchiveCondition(za, v1alpha1.ConditionAvailable, metav1.ConditionTrue, v1alpha1.ReasonServed, "serving "+za.Status.Current.File)
+	setAvailable(za)
 	return nil
+}
+
+// setAvailable sets Available from the archive's own status: Served with a current version, AwaitingAdoption while adoptFile waits, else NotYetFetched.
+func setAvailable(za *v1alpha1.ZimArchive) {
+	switch {
+	case za.Status.Current != nil:
+		setArchiveCondition(za, v1alpha1.ConditionAvailable, metav1.ConditionTrue, v1alpha1.ReasonServed, "serving "+za.Status.Current.File)
+	case za.Spec.AdoptFile != "":
+		setArchiveCondition(za, v1alpha1.ConditionAvailable, metav1.ConditionFalse, v1alpha1.ReasonAwaitingAdoption, "waiting to adopt "+za.Spec.AdoptFile)
+	default:
+		setArchiveCondition(za, v1alpha1.ConditionAvailable, metav1.ConditionFalse, v1alpha1.ReasonNotYetFetched, "no version in the library yet")
+	}
 }
 
 func currentFrom(b libapi.BookInfo) *v1alpha1.CurrentVersion {
@@ -151,13 +159,13 @@ func (r *ZimArchiveReconciler) adopt(ctx context.Context, za *v1alpha1.ZimArchiv
 		default:
 			za.Status.Current = currentFrom(book)
 			za.Status.Current.PromotedAt = new(metav1.NewTime(r.now()))
-			setArchiveCondition(za, v1alpha1.ConditionAvailable, metav1.ConditionTrue, v1alpha1.ReasonServed, "serving "+book.File)
+			setAvailable(za)
 			r.Recorder.Eventf(za, nil, corev1.EventTypeNormal, "Adopted", "Adopt", "adopted %s as %s", file, book.File)
 			return "", nil
 		}
 	}
 	setArchiveCondition(za, v1alpha1.ConditionDegraded, metav1.ConditionTrue, reason, msg)
-	setArchiveCondition(za, v1alpha1.ConditionAvailable, metav1.ConditionFalse, v1alpha1.ReasonAwaitingAdoption, "waiting to adopt "+file)
+	setAvailable(za)
 	return reason, nil
 }
 
@@ -199,15 +207,17 @@ func (r *ZimArchiveReconciler) awaitAdoption(ctx context.Context, za *v1alpha1.Z
 	return ctrl.Result{RequeueAfter: statusPoll}, nil
 }
 
-// notify posts to lib's webhook when it has one; a failure is logged and recorded as an Event, never returned.
-func (r *ZimArchiveReconciler) notify(ctx context.Context, za *v1alpha1.ZimArchive, lib *v1alpha1.KiwixLibrary, title, msg string) {
+// notify posts to lib's webhook when it has one and reports whether it was delivered; a failure is logged and recorded as an Event, never returned.
+func (r *ZimArchiveReconciler) notify(ctx context.Context, za *v1alpha1.ZimArchive, lib *v1alpha1.KiwixLibrary, title, msg string) bool {
 	if lib.Spec.Notify == nil {
-		return
+		return false
 	}
 	if err := r.Notifier.Send(ctx, lib.Spec.Notify.Webhook.URL, title, msg); err != nil {
 		ctrl.LoggerFrom(ctx).Error(err, "notification failed", "title", title)
 		r.Recorder.Eventf(za, nil, corev1.EventTypeWarning, "NotifyFailed", "Notify", "%s: %v", title, err)
+		return false
 	}
+	return true
 }
 
 func dueInput(za *v1alpha1.ZimArchive) schedule.DueInput {
@@ -270,7 +280,8 @@ func (r *ZimArchiveReconciler) recordUnchanged(za *v1alpha1.ZimArchive, due sche
 	}
 	consumeTrigger(za, due)
 	setIdle(za)
-	r.Recorder.Eventf(za, nil, corev1.EventTypeNormal, string(v1alpha1.AttemptResultUnchanged), "Refresh", "%s refresh: %s", due.Trigger, za.Status.LastAttempt.Message)
+	settleDegraded(za)
+	r.Recorder.Eventf(za, nil, corev1.EventTypeNormal, attemptEvent(v1alpha1.AttemptResultUnchanged), "Refresh", "%s refresh: %s", due.Trigger, za.Status.LastAttempt.Message)
 }
 
 // requestedBy is the requestedAt value that triggered due, or "" for another trigger.
@@ -344,38 +355,32 @@ func (r *ZimArchiveReconciler) createAttempt(ctx context.Context, za *v1alpha1.Z
 	if err := r.saveStatus(ctx, za, before); err != nil {
 		return ctrl.Result{}, err
 	}
-	return r.ensureAttempt(ctx, za, lib, lc, entry, before)
-}
-
-// resume finishes creating an open attempt whose start was interrupted.
-func (r *ZimArchiveReconciler) resume(ctx context.Context, za *v1alpha1.ZimArchive, lib *v1alpha1.KiwixLibrary) (ctrl.Result, error) {
-	lc, err := r.librarian(ctx, lib)
-	if err != nil {
+	r.Recorder.Eventf(za, nil, corev1.EventTypeNormal, "AttemptStarted", "Start", "%s attempt %s started (%s)",
+		za.Status.LastAttempt.Kind, za.Status.LastAttempt.ID, due.Trigger)
+	if err := r.ensureAttempt(ctx, za, lib, lc, entry, before); err != nil {
 		return ctrl.Result{}, err
 	}
-	return r.ensureAttempt(ctx, za, lib, lc, nil, za.Status.DeepCopy())
+	return ctrl.Result{RequeueAfter: openAttemptPoll}, nil
 }
 
-// ensureAttempt creates, in order, the upload Secret, the registration and the crawl Job with its ConfigMap, skipping each that already exists.
-func (r *ZimArchiveReconciler) ensureAttempt(ctx context.Context, za *v1alpha1.ZimArchive, lib *v1alpha1.KiwixLibrary, lc ArchiveLibrarian, entry *catalog.Entry, before *v1alpha1.ZimArchiveStatus) (ctrl.Result, error) {
+// ensureAttempt creates, in order, the upload Secret unless it exists, the registration, and the crawl Job with its ConfigMap unless they exist.
+func (r *ZimArchiveReconciler) ensureAttempt(ctx context.Context, za *v1alpha1.ZimArchive, lib *v1alpha1.KiwixLibrary, lc ArchiveLibrarian, entry *catalog.Entry, before *v1alpha1.ZimArchiveStatus) error {
 	var tokenHash string
 	if za.Spec.Source.Crawl != nil {
 		token, err := r.ensureUploadSecret(ctx, za)
 		if err != nil {
-			return ctrl.Result{}, err
+			return err
 		}
 		sum := sha256.Sum256([]byte(token))
 		tokenHash = hex.EncodeToString(sum[:])
 	}
-	if err := r.ensureRegistered(ctx, za, lc, tokenHash, entry); err != nil {
-		return ctrl.Result{}, err
+	if err := r.register(ctx, za, lc, tokenHash, entry, before); err != nil {
+		return err
 	}
 	if za.Spec.Source.Crawl != nil {
-		if err := r.ensureJob(ctx, za, lib, before); err != nil {
-			return ctrl.Result{}, err
-		}
+		return r.ensureJob(ctx, za, lib, before)
 	}
-	return ctrl.Result{RequeueAfter: openAttemptPoll}, nil
+	return nil
 }
 
 // ensureUploadSecret returns the attempt's upload token, creating its Secret, owned by the archive, when there is none.
@@ -400,16 +405,9 @@ func (r *ZimArchiveReconciler) ensureUploadSecret(ctx context.Context, za *v1alp
 	return string(s.Data[uploadTokenKey]), nil
 }
 
-// ensureRegistered registers the attempt unless the librarian already knows it; a catalog fetch resumed after a restart looks its entry up again.
-func (r *ZimArchiveReconciler) ensureRegistered(ctx context.Context, za *v1alpha1.ZimArchive, lc ArchiveLibrarian, tokenHash string, entry *catalog.Entry) error {
+// register registers the open attempt. A fetch records the catalog version it pulls before registering, so the promotion can name it without asking the catalog again.
+func (r *ZimArchiveReconciler) register(ctx context.Context, za *v1alpha1.ZimArchive, lc ArchiveLibrarian, tokenHash string, entry *catalog.Entry, before *v1alpha1.ZimArchiveStatus) error {
 	a := za.Status.LastAttempt
-	_, err := lc.Get(ctx, a.ID)
-	if err == nil {
-		return nil
-	}
-	if !errors.Is(err, libclient.ErrNotFound) {
-		return fmt.Errorf("read attempt %s from the librarian: %w", a.ID, err)
-	}
 	req := libapi.RegisterRequest{
 		Archive: za.Name, Attempt: a.ID, Kind: a.Kind, TokenHash: tokenHash, Deadline: a.Deadline.Time,
 	}
@@ -421,8 +419,15 @@ func (r *ZimArchiveReconciler) ensureRegistered(ctx context.Context, za *v1alpha
 		if c.KeepWarcs {
 			req.Parts = append(req.Parts, libapi.PartWARCs)
 		}
-	} else if req.Fetch, err = r.fetchSpec(ctx, za.Spec.Source.Download, entry); err != nil {
-		return err
+	} else {
+		fetch, version, err := r.fetchSpec(ctx, za.Spec.Source.Download, entry)
+		if err != nil {
+			return err
+		}
+		req.Fetch, a.SourceVersion = fetch, version
+		if err := r.saveStatus(ctx, za, before); err != nil {
+			return err
+		}
 	}
 	if _, err := lc.Register(ctx, req); err != nil {
 		return fmt.Errorf("register attempt %s of %s: %w", a.ID, za.Name, err)
@@ -430,19 +435,19 @@ func (r *ZimArchiveReconciler) ensureRegistered(ctx context.Context, za *v1alpha
 	return nil
 }
 
-// fetchSpec is what a fetch attempt pulls: the catalog entry's .meta4 URL, hash and size, or the spec URL and hash.
-func (r *ZimArchiveReconciler) fetchSpec(ctx context.Context, d *v1alpha1.DownloadSource, entry *catalog.Entry) (*libapi.FetchSpec, error) {
+// fetchSpec is what a fetch attempt pulls, with the catalog version: the catalog entry's .meta4 URL, hash and size, looked up when entry is nil, or the spec URL and hash.
+func (r *ZimArchiveReconciler) fetchSpec(ctx context.Context, d *v1alpha1.DownloadSource, entry *catalog.Entry) (*libapi.FetchSpec, string, error) {
 	if d.Catalog == nil {
-		return &libapi.FetchSpec{URL: d.URL, SHA256: d.SHA256}, nil
+		return &libapi.FetchSpec{URL: d.URL, SHA256: d.SHA256}, "", nil
 	}
 	if entry == nil {
 		e, err := r.Catalog.Latest(ctx, d.Catalog.Name, d.Catalog.Flavour)
 		if err != nil {
-			return nil, fmt.Errorf("look up %s in the catalog: %w", d.Catalog.Name, err)
+			return nil, "", fmt.Errorf("look up %s in the catalog: %w", d.Catalog.Name, err)
 		}
 		entry = &e
 	}
-	return &libapi.FetchSpec{URL: entry.URL, SHA256: entry.SHA256, Size: entry.Size}, nil
+	return &libapi.FetchSpec{URL: entry.URL, SHA256: entry.SHA256, Size: entry.Size}, entry.Version, nil
 }
 
 // ensureJob creates the crawl Job, owned by the archive, records jobCreated, then creates the customCss ConfigMap owned by the Job.
@@ -490,11 +495,11 @@ func setIdle(za *v1alpha1.ZimArchive) {
 	setArchiveCondition(za, v1alpha1.ConditionProgressing, metav1.ConditionFalse, v1alpha1.ReasonIdle, "no attempt running")
 }
 
-// clearDegraded sets Degraded to Healthy when it is unset or set for one of reasons, which the caller has just found resolved.
+// clearDegraded recomputes Degraded from the last attempt when it is unset or held by one of reasons, which the caller has just found resolved.
 func clearDegraded(za *v1alpha1.ZimArchive, reasons ...string) {
 	c := meta.FindStatusCondition(za.Status.Conditions, v1alpha1.ConditionDegraded)
 	if c == nil || (c.Status == metav1.ConditionTrue && slices.Contains(reasons, c.Reason)) {
-		setArchiveCondition(za, v1alpha1.ConditionDegraded, metav1.ConditionFalse, v1alpha1.ReasonHealthy, "no problem found")
+		attemptDegraded(za)
 	}
 }
 

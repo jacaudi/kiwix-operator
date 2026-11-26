@@ -54,6 +54,19 @@ type fakeArchiveLibrarian struct {
 	registerErrs []error
 	registered   []libapi.RegisterRequest
 	getCalls     int
+
+	// states are the attempts Get reports, ahead of the registered ones; getQueue is served first, one per Get.
+	states   map[string]*libapi.AttemptState
+	getQueue []libapi.AttemptState
+	getErr   error
+
+	promoteErrs []error
+	promoted    []libapi.PromoteRequest
+	discarded   []string
+
+	deleteDone bool
+	deleteErr  error
+	deletes    []string
 }
 
 func (f *fakeArchiveLibrarian) Register(_ context.Context, req libapi.RegisterRequest) (libapi.AttemptState, error) {
@@ -68,6 +81,17 @@ func (f *fakeArchiveLibrarian) Register(_ context.Context, req libapi.RegisterRe
 
 func (f *fakeArchiveLibrarian) Get(_ context.Context, attempt string) (libapi.AttemptState, error) {
 	f.getCalls++
+	if f.getErr != nil {
+		return libapi.AttemptState{}, f.getErr
+	}
+	if len(f.getQueue) > 0 {
+		st := f.getQueue[0]
+		f.getQueue = f.getQueue[1:]
+		return st, nil
+	}
+	if st, ok := f.states[attempt]; ok {
+		return *st, nil
+	}
 	for _, r := range f.registered {
 		if r.Attempt == attempt {
 			return libapi.AttemptState{Archive: r.Archive, Attempt: attempt, Kind: r.Kind, State: libapi.StateRegistered}, nil
@@ -76,12 +100,30 @@ func (f *fakeArchiveLibrarian) Get(_ context.Context, attempt string) (libapi.At
 	return libapi.AttemptState{}, fmt.Errorf("attempt %s: %w", attempt, libclient.ErrNotFound)
 }
 
-func (f *fakeArchiveLibrarian) Promote(context.Context, string, libapi.PromoteRequest) (libapi.BookInfo, error) {
-	return libapi.BookInfo{}, errors.New("promote is not part of the start phase")
+// Promote makes the attempt's staged book current, unless an error is queued.
+func (f *fakeArchiveLibrarian) Promote(_ context.Context, attempt string, req libapi.PromoteRequest) (libapi.BookInfo, error) {
+	f.promoted = append(f.promoted, req)
+	if len(f.promoteErrs) > 0 {
+		err := f.promoteErrs[0]
+		f.promoteErrs = f.promoteErrs[1:]
+		return libapi.BookInfo{}, err
+	}
+	st := f.states[attempt]
+	b := *st.Staged
+	b.Archive, b.File, b.SourceVersion, b.SourceFingerprint = st.Archive, st.Archive+".zim", req.SourceVersion, req.SourceFingerprint
+	f.current = &b
+	st.State = libapi.StatePromoted
+	return b, nil
 }
 
-func (f *fakeArchiveLibrarian) Discard(context.Context, string) (libapi.AttemptState, error) {
-	return libapi.AttemptState{}, errors.New("discard is not part of the start phase")
+func (f *fakeArchiveLibrarian) Discard(_ context.Context, attempt string) (libapi.AttemptState, error) {
+	f.discarded = append(f.discarded, attempt)
+	st, ok := f.states[attempt]
+	if !ok {
+		return libapi.AttemptState{}, fmt.Errorf("attempt %s: %w", attempt, libclient.ErrNotFound)
+	}
+	st.State = libapi.StateDiscarded
+	return *st, nil
 }
 
 func (f *fakeArchiveLibrarian) Archive(context.Context, string) (*libapi.BookInfo, error) {
@@ -97,8 +139,9 @@ func (f *fakeArchiveLibrarian) Adopt(_ context.Context, archive string, req liba
 	return *f.current, nil
 }
 
-func (f *fakeArchiveLibrarian) Delete(context.Context, string, string) (bool, error) {
-	return false, errors.New("delete is not part of the start phase")
+func (f *fakeArchiveLibrarian) Delete(_ context.Context, _, policy string) (bool, error) {
+	f.deletes = append(f.deletes, policy)
+	return f.deleteDone, f.deleteErr
 }
 
 // fakeCatalog serves an OPDS feed of entries and one .meta4 per entry.

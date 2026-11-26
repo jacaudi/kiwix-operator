@@ -313,6 +313,10 @@ type AttemptStatus struct {
 	// +optional
 	Deadline *metav1.Time `json:"deadline,omitempty"`
 
+	// SourceVersion is the catalog version a catalog fetch downloads, as YYYY-MM
+	// +optional
+	SourceVersion string `json:"sourceVersion,omitempty"`
+
 	// Result is the outcome once the attempt has ended
 	// +optional
 	Result AttemptResult `json:"result,omitempty"`

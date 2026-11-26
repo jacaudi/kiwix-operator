@@ -17,6 +17,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -66,35 +67,61 @@ type ZimArchiveReconciler struct {
 	apiReader client.Reader
 }
 
-// +kubebuilder:rbac:groups=kiwix.jacaudi.dev,resources=zimarchives,verbs=get;list;watch
+// +kubebuilder:rbac:groups=kiwix.jacaudi.dev,resources=zimarchives,verbs=get;list;watch;update
 // +kubebuilder:rbac:groups=kiwix.jacaudi.dev,resources=zimarchives/status,verbs=get;update
 // +kubebuilder:rbac:groups=kiwix.jacaudi.dev,resources=zimarchives/finalizers,verbs=update
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create
 // +kubebuilder:rbac:groups=batch,resources=jobs/finalizers,verbs=update
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
-// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;delete
 
-// Reconcile resumes an archive's open attempt, or runs the start phase.
+// Reconcile finalizes a deleted archive; otherwise it ensures the finalizer, then tracks the open attempt or runs the start phase.
 func (r *ZimArchiveReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var za v1alpha1.ZimArchive
 	if err := r.Get(ctx, req.NamespacedName, &za); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-	var lib v1alpha1.KiwixLibrary
-	if err := r.Get(ctx, types.NamespacedName{Namespace: za.Namespace, Name: za.Spec.LibraryRef.Name}, &lib); err != nil {
-		if !apierrors.IsNotFound(err) {
-			return ctrl.Result{}, fmt.Errorf("get KiwixLibrary %s/%s: %w", za.Namespace, za.Spec.LibraryRef.Name, err)
+	lib, err := r.library(ctx, &za)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if !za.DeletionTimestamp.IsZero() {
+		return r.finalize(ctx, &za, lib)
+	}
+	if controllerutil.AddFinalizer(&za, v1alpha1.FinalizerName) {
+		if err := r.Update(ctx, &za); err != nil {
+			return ctrl.Result{}, fmt.Errorf("add finalizer to ZimArchive %s/%s: %w", za.Namespace, za.Name, err)
 		}
-		before := za.Status.DeepCopy()
-		setArchiveCondition(&za, v1alpha1.ConditionAvailable, metav1.ConditionFalse, v1alpha1.ReasonLibraryUnavailable,
-			fmt.Sprintf("KiwixLibrary %s not found", za.Spec.LibraryRef.Name))
-		return ctrl.Result{RequeueAfter: statusPoll}, r.saveStatus(ctx, &za, before)
 	}
 	if attemptOpen(za.Status.LastAttempt) {
-		return r.resume(ctx, &za, &lib)
+		return r.progress(ctx, &za, lib)
 	}
-	return r.start(ctx, &za, &lib)
+	if lib == nil {
+		before := za.Status.DeepCopy()
+		setArchiveCondition(&za, v1alpha1.ConditionAvailable, metav1.ConditionFalse, v1alpha1.ReasonLibraryUnavailable,
+			fmt.Sprintf("KiwixLibrary %s is absent or being deleted", za.Spec.LibraryRef.Name))
+		return ctrl.Result{RequeueAfter: statusPoll}, r.saveStatus(ctx, &za, before)
+	}
+	if err := r.notifyAttempt(ctx, &za, lib); err != nil {
+		return ctrl.Result{}, err
+	}
+	return r.start(ctx, &za, lib)
+}
+
+// library returns za's KiwixLibrary, or nil when it is absent or being deleted.
+func (r *ZimArchiveReconciler) library(ctx context.Context, za *v1alpha1.ZimArchive) (*v1alpha1.KiwixLibrary, error) {
+	var lib v1alpha1.KiwixLibrary
+	err := r.Get(ctx, types.NamespacedName{Namespace: za.Namespace, Name: za.Spec.LibraryRef.Name}, &lib)
+	switch {
+	case apierrors.IsNotFound(err):
+		return nil, nil
+	case err != nil:
+		return nil, fmt.Errorf("get KiwixLibrary %s/%s: %w", za.Namespace, za.Spec.LibraryRef.Name, err)
+	case !lib.DeletionTimestamp.IsZero():
+		return nil, nil
+	}
+	return &lib, nil
 }
 
 func (r *ZimArchiveReconciler) now() time.Time {
@@ -117,9 +144,10 @@ func (r *ZimArchiveReconciler) librarian(ctx context.Context, lib *v1alpha1.Kiwi
 	return r.NewLibrarian(lib, token), nil
 }
 
-// saveStatus writes za's status when it differs from before, then makes before the written status.
+// saveStatus writes za's status, every condition set, when it differs from before, then makes before the written status.
 func (r *ZimArchiveReconciler) saveStatus(ctx context.Context, za *v1alpha1.ZimArchive, before *v1alpha1.ZimArchiveStatus) error {
 	za.Status.ObservedGeneration = za.Generation
+	defaultConditions(za)
 	if equality.Semantic.DeepEqual(before, &za.Status) {
 		return nil
 	}
