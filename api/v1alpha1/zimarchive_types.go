@@ -99,6 +99,8 @@ type CrawlSource struct {
 
 	// Timeout is how long the crawl Job may run
 	// +kubebuilder:default="48h"
+	// +kubebuilder:validation:Type=string
+	// +kubebuilder:validation:Pattern=`^([0-9]+(\.[0-9]+)?(ms|s|m|h))+$`
 	// +optional
 	Timeout metav1.Duration `json:"timeout,omitzero"`
 
@@ -342,7 +344,8 @@ type ZimArchive struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   ZimArchiveSpec   `json:"spec,omitempty"`
+	// +required
+	Spec   ZimArchiveSpec   `json:"spec"`
 	Status ZimArchiveStatus `json:"status,omitempty"`
 }
 

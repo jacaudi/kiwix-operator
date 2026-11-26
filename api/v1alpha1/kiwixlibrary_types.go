@@ -146,7 +146,8 @@ type KiwixLibrary struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   KiwixLibrarySpec   `json:"spec,omitempty"`
+	// +required
+	Spec   KiwixLibrarySpec   `json:"spec"`
 	Status KiwixLibraryStatus `json:"status,omitempty"`
 }
 

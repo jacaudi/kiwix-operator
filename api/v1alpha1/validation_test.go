@@ -343,3 +343,58 @@ func TestDeletionPolicyEnum(t *testing.T) {
 		})
 	}
 }
+
+func TestSpecRequired(t *testing.T) {
+	tests := []struct {
+		kind string
+		name string
+	}{
+		{"KiwixLibrary", "spec-required-lib"},
+		{"ZimArchive", "spec-required-zim"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.kind, func(t *testing.T) {
+			u := &unstructured.Unstructured{Object: map[string]any{
+				"apiVersion": GroupVersion.String(),
+				"kind":       tt.kind,
+				"metadata":   map[string]any{"name": tt.name, "namespace": testNamespace},
+			}}
+			requireInvalid(t, k8sClient.Create(t.Context(), u), "spec")
+		})
+	}
+}
+
+func TestTimeoutFormat(t *testing.T) {
+	tests := []struct {
+		name    string
+		timeout string
+		wantErr bool
+	}{
+		{"hours", "48h", false},
+		{"compound", "1h30m", false},
+		{"days", "2d", true},
+		{"bare-number", "30", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			u := &unstructured.Unstructured{Object: map[string]any{
+				"apiVersion": GroupVersion.String(),
+				"kind":       "ZimArchive",
+				"metadata":   map[string]any{"name": "timeout-" + tt.name, "namespace": testNamespace},
+				"spec": map[string]any{
+					"libraryRef": map[string]any{"name": "lib"},
+					"source": map[string]any{"crawl": map[string]any{
+						"seeds":   []any{"https://example.org"},
+						"timeout": tt.timeout,
+					}},
+				},
+			}}
+			err := k8sClient.Create(t.Context(), u)
+			if tt.wantErr {
+				requireInvalid(t, err, "timeout")
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}
