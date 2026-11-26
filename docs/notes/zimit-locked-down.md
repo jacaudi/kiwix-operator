@@ -26,7 +26,7 @@ docker run --name zimit-probe --network kiwix-probe \
 ## Findings that affect later tasks
 
 1. **`:nocopy` is required.** The zimit image bakes in `/output` (`0:0 755`). Docker copies that ownership onto an empty named volume at first mount, which erases the `0:1000 2775` setup and makes the uid-1000 step fail with `tar: can't open '/output/warcs.tar': Permission denied`. Kubernetes does not copy up, so `fsGroup` holds there.
-2. **The upload tar must exclude the Chromium profile.** The crawler leaves `build/collections/<id>/profile` as root-owned `0700` directories. A literal `tar -C /output -cf /output/warcs.tar build` as uid 1000 exits non-zero with 18 `Permission denied` lines (below) even though the ZIM and all `*.warc.gz` files are group/world readable. The probe therefore uses `--exclude='build/collections/*/profile'`; this deviates from the brief's literal command. Capabilities do not help (uid 1000 runs in a different container), as the three attempts below show.
+2. **`warcs.tar` must be an allowlist: only `build/collections/*/archive/`.** The crawler leaves `build/collections/<id>/profile` as root-owned `0700` directories. A literal `tar -C /output -cf /output/warcs.tar build` as uid 1000 exits non-zero with 18 `Permission denied` lines (below) even though the ZIM and all `*.warc.gz` files are group/world readable. A denylist of the profile would break again on any other root-only dir a future zimit leaves in `build/`, so the probe (and Task 18) tar just the archive dirs: `sh -c 'cd /output && tar -cf warcs.tar build/collections/*/archive'`. This deviates from the brief's literal command. Capabilities do not help (uid 1000 runs in a different container), as the attempts below show.
 3. **Disk threshold.** zimit defaults the crawler to `--diskUtilization 90`; on a Docker VM over 90% full the crawl exits `Out of disk space, exiting` (code 3) before fetching anything. `ZIMIT_EXTRA="--diskUtilization 95"` was passed for these runs (this VM was at 91% after pruning build cache); `0` and `100` did not bypass the check. Not a capability issue.
 4. New files inherit group 1000 from the setgid root, so a uid-1000 reader works for ZIM and WARCs.
 
@@ -38,6 +38,6 @@ docker run --name zimit-probe --network kiwix-probe \
 | `SYS_CHROOT` (literal tar) | ZIM built; same `tar ... profile ...: Permission denied` errors; exit 1 |
 | `SYS_ADMIN` (literal tar) | ZIM built; same errors; exit 1 |
 | `SYS_CHROOT SYS_ADMIN` (literal tar) | ZIM built; same errors; exit 1 |
-| `""` (tar excludes profile) | `PROBE OK: probe_2026-11.zim caps=[]` |
+| `""` (tar of `build/collections/*/archive` only) | `PROBE OK: probe_2026-11.zim caps=[]` |
 
 Earlier failures with `caps=[]` that were environment, not capabilities: `Out of disk space, exiting` (finding 3) and `tar: can't open '/output/warcs.tar': Permission denied` (finding 1).

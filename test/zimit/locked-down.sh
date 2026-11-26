@@ -39,9 +39,9 @@ docker run --name zimit-probe --network "$NET" \
   -v "$VOL":/output:nocopy "$ZIMIT" \
   zimit --seeds http://site/ --name probe --output /output --build /output/build --workers 1 $ZIMIT_EXTRA
 
-# the root-owned 0700 Chromium profile is unreadable to uid 1000 and is not crawl output, so exclude it
+# warcs.tar holds only the WARC archive dirs: the root-owned 0700 Chromium profile elsewhere in build/ is unreadable to uid 1000
 docker run --rm --user 1000:1000 -v "$VOL":/output "$NGINX" \
-  tar -C /output --exclude='build/collections/*/profile' -cf /output/warcs.tar build
+  sh -c 'cd /output && tar -cf warcs.tar build/collections/*/archive'
 
 listing="$(docker run --rm -v "$VOL":/output "$NGINX" sh -c 'ls /output/*.zim 2>/dev/null; echo ---; tar -tf /output/warcs.tar')"
 zims="$(printf '%s\n' "$listing" | sed '/^---$/,$d' | grep -c '\.zim$' || true)"
