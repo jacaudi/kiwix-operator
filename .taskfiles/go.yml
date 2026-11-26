@@ -44,8 +44,9 @@ tasks:
 
   test:
     desc: Run tests with the race detector
+    deps: [":setup-envtest"]
     cmds:
-      - go test ./... -race
+      - KUBEBUILDER_ASSETS="$({{.SETUP_ENVTEST}} use {{.ENVTEST_K8S_VERSION}} --bin-dir {{.LOCALBIN}} -p path)" go test ./... -race
 
   build:
     desc: Build binaries into ./bin/

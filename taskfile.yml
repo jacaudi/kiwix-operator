@@ -12,6 +12,8 @@ vars:
   LOCALBIN: '{{.ROOT_DIR}}/bin'
   CONTROLLER_TOOLS_VERSION: v0.23.0
   CONTROLLER_GEN: '{{.LOCALBIN}}/controller-gen'
+  ENVTEST_K8S_VERSION: 1.35.x
+  SETUP_ENVTEST: '{{.LOCALBIN}}/setup-envtest'
   # Packages held to the coverage floor.
   COVERAGE_PACKAGES: ./internal/...
   COVERAGE_THRESHOLD: 70
@@ -153,3 +155,11 @@ tasks:
       - GOBIN={{.LOCALBIN}} go install sigs.k8s.io/controller-tools/cmd/controller-gen@{{.CONTROLLER_TOOLS_VERSION}}
     status:
       - test -s {{.CONTROLLER_GEN}}
+
+  setup-envtest:
+    desc: Install setup-envtest if not present
+    cmds:
+      - mkdir -p {{.LOCALBIN}}
+      - GOBIN={{.LOCALBIN}} go install sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.25
+    status:
+      - test -s {{.SETUP_ENVTEST}}
