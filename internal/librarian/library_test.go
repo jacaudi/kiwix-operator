@@ -345,3 +345,29 @@ func TestHTTPConfirmerTransportError(t *testing.T) {
 	require.Error(t, err)
 	assert.False(t, got)
 }
+
+// blockingConfirmer never answers until its ctx ends, like a kiwix-serve that accepts the connection and stalls.
+type blockingConfirmer struct{ calls atomic.Int32 }
+
+func (b *blockingConfirmer) Confirm(ctx context.Context, _ Change) (bool, error) {
+	b.calls.Add(1)
+	<-ctx.Done()
+	return false, ctx.Err()
+}
+
+func TestWriteWindowBoundsStalledConfirm(t *testing.T) {
+	w, _ := newTestWriter(t, confirmAlways)
+	bc := &blockingConfirmer{}
+	w.Confirmer = bc
+	// The test's own deadline makes a regression fail instead of hang.
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	start := time.Now()
+
+	confirmed, err := w.Write(ctx, manifestOf(nil), Change{})
+
+	require.NoError(t, err, "a stalled confirm must end at the window, not at the caller's ctx")
+	assert.False(t, confirmed)
+	assert.Less(t, time.Since(start), time.Second, "bounded by MaxRenders x Window")
+	assert.Equal(t, int32(3), bc.calls.Load(), "one stalled confirm per render")
+}

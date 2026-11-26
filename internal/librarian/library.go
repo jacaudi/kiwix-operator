@@ -79,23 +79,22 @@ func (w *Writer) render(m *Manifest) error {
 	return WriteFileAtomic(w.Path, Render(m), &mtime)
 }
 
-// await polls the Confirmer every Poll for one Window.
+// await polls the Confirmer every Poll for one Window; the window also bounds each in-flight Confirm, and only the caller's own ctx ending is an error.
 func (w *Writer) await(ctx context.Context, c Change) (bool, error) {
-	window := time.NewTimer(w.Window)
-	defer window.Stop()
+	wctx, cancel := context.WithTimeout(ctx, w.Window)
+	defer cancel()
 	tick := time.NewTicker(w.Poll)
 	defer tick.Stop()
-	for {
+	for wctx.Err() == nil {
 		select {
-		case <-ctx.Done():
-			return false, ctx.Err()
-		case <-window.C:
-			return false, nil
+		case <-wctx.Done():
 		case <-tick.C:
 			// An error means the answer is unknown, so keep polling until the window ends.
-			if ok, err := w.Confirmer.Confirm(ctx, c); err == nil && ok {
+			if ok, err := w.Confirmer.Confirm(wctx, c); err == nil && ok {
 				return true, nil
 			}
 		}
 	}
+	// Nil when only the window ended.
+	return false, ctx.Err()
 }

@@ -38,6 +38,7 @@ func (h HTTPConfirmer) Confirm(ctx context.Context, c Change) (bool, error) {
 			return false, err
 		}
 		// The closing quote makes the match exact: stem "devdocs" must not match href "/content/devdocs_en_python".
+		// Every reachable stem is [a-z0-9._-] (canonical and adoptFile names after ContentID), where PathEscape matches libkiwix urlEncode.
 		if status != http.StatusOK || !strings.Contains(body, `href="/content/`+url.PathEscape(stem)+`"`) {
 			return false, nil
 		}
