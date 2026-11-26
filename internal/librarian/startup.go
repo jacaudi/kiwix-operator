@@ -19,6 +19,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/jacaudi/kiwix-operator/internal/libapi"
+	"github.com/jacaudi/kiwix-operator/internal/netguard"
 )
 
 const (
@@ -214,9 +215,9 @@ func recoverAndCollect(ctx context.Context, log *slog.Logger, store *Store, atte
 	}
 }
 
-// fetchClient bounds the wait for response headers, so a server that accepts and stays silent cannot hold a fetch until its 24 h deadline. It sets no total timeout: a download's body is bounded by idleTimeout.
+// fetchClient bounds the wait for response headers, so a server that accepts and stays silent cannot hold a fetch until its 24 h deadline. It sets no total timeout: a download's body is bounded by idleTimeout. The download URL is a user's, so the transport refuses loopback and link-local destinations, redirects included.
 func fetchClient() *http.Client {
-	t := http.DefaultTransport.(*http.Transport).Clone()
+	t := netguard.Transport()
 	t.ResponseHeaderTimeout = fetchHeaderTimeout
 	return &http.Client{Transport: t}
 }

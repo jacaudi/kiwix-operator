@@ -2,11 +2,14 @@ package librarian
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/jacaudi/kiwix-operator/internal/netguard"
 )
 
 func TestFetchClientBoundsHeadersOnly(t *testing.T) {
@@ -26,4 +29,20 @@ func TestRunRejectsBadConfig(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "max fetches")
 	assert.Contains(t, err.Error(), "reserve")
+}
+
+func TestFetchClientRefusesLocalDestinations(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Error("a fetch must not reach a loopback server")
+	}))
+	t.Cleanup(srv.Close)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL, nil)
+	require.NoError(t, err)
+
+	resp, err := fetchClient().Do(req)
+
+	if resp != nil {
+		assert.NoError(t, resp.Body.Close())
+	}
+	require.ErrorIs(t, err, netguard.ErrForbidden)
 }
