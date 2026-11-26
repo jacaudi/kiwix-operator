@@ -22,6 +22,9 @@ const maxDrain = 64 << 10
 // requestTimeout bounds each attempt; it is a variable only so a test can shorten it, and it is applied with a context so an injected HTTP client cannot remove it.
 var requestTimeout = 10 * time.Second
 
+// sendTimeout bounds one Send, retries and waits included; it is a variable only so a test can shorten it.
+var sendTimeout = 20 * time.Second
+
 // Notifier posts to a webhook. The zero value sends once with http.DefaultClient and no User-Agent.
 type Notifier struct {
 	// HTTP is the client to send with; nil means http.DefaultClient.
@@ -39,7 +42,7 @@ type payload struct {
 	Message string `json:"message"`
 }
 
-// Send posts the notification and returns nil on a 2xx. It retries after 1 s, 2 s, then 4 s for every later wait, and returns the last error when it gives up.
+// Send posts the notification and returns nil on a 2xx. It retries after 1 s, 2 s, then 4 s for every later wait, and returns the last error when it gives up, which it does after sendTimeout in total at the latest.
 // The webhook URL may carry a secret, so errors name the host only.
 func (n *Notifier) Send(ctx context.Context, webhookURL, title, message string) error {
 	u, err := url.Parse(webhookURL)
@@ -51,6 +54,10 @@ func (n *Notifier) Send(ctx context.Context, webhookURL, title, message string) 
 	if err != nil {
 		return fmt.Errorf("encode notification: %w", err)
 	}
+
+	// Send runs on a reconcile worker shared by every namespace, so a webhook that stalls must not hold it for Retries x requestTimeout.
+	ctx, cancel := context.WithTimeout(ctx, sendTimeout)
+	defer cancel()
 
 	var last error
 	for attempt := 0; ; attempt++ {

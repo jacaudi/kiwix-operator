@@ -269,3 +269,23 @@ func TestOtherMessages(t *testing.T) {
 		})
 	}
 }
+
+func TestSendTotalTimeIsBounded(t *testing.T) {
+	old := sendTimeout
+	sendTimeout = 150 * time.Millisecond
+	t.Cleanup(func() { sendTimeout = old })
+	stall := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		<-r.Context().Done()
+	}))
+	t.Cleanup(stall.Close)
+	sleep, _ := recorder()
+	// Each request alone may take requestTimeout, and Retries multiplies it; the total must still end at sendTimeout.
+	n := &Notifier{Retries: 3, Sleep: sleep}
+
+	start := time.Now()
+	err := n.Send(t.Context(), stall.URL, "t", "m")
+
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Less(t, time.Since(start), 5*time.Second)
+}
