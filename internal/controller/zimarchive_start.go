@@ -235,8 +235,9 @@ func dueInput(za *v1alpha1.ZimArchive) schedule.DueInput {
 	}
 	if a := za.Status.LastAttempt; a != nil {
 		in.EverAttempted = true
-		in.LastFailedOrRejected = a.Result == v1alpha1.AttemptResultFailed || a.Result == v1alpha1.AttemptResultRejected
+		// An open attempt's result is a pending outcome, not a finished failure.
 		if a.FinishedAt != nil {
+			in.LastFailedOrRejected = a.Result == v1alpha1.AttemptResultFailed || a.Result == v1alpha1.AttemptResultRejected
 			in.LastFinished = a.FinishedAt.Time
 		}
 	}

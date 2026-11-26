@@ -134,6 +134,10 @@ func (r *ZimArchiveReconciler) track(ctx context.Context, za *v1alpha1.ZimArchiv
 		}
 		return r.finish(ctx, za, lib, before, outcome{result: v1alpha1.AttemptResultSucceeded, book: book})
 	case libapi.StateDiscarded:
+		// A result on the open attempt is the outcome this operator recorded before its own Discard.
+		if a.Result != "" {
+			return r.finish(ctx, za, lib, before, outcome{result: a.Result, reason: a.Reason, msg: a.Message})
+		}
 		return r.finish(ctx, za, lib, before, failed(kindFailure(a.Kind), "discarded by the librarian"))
 	case libapi.StateFailed:
 		return r.finish(ctx, za, lib, before, failed(failureReason(a.Kind, st.Code), st.Error))
@@ -246,9 +250,15 @@ func promoteSourceVersion(za *v1alpha1.ZimArchive, now time.Time) string {
 	return now.UTC().Format("2006-01")
 }
 
-// discardAndFinish discards the attempt in the librarian, then finishes it with o; a final refusal, such as a promotion in progress, still finishes it.
+// discardAndFinish records o on the still-open attempt, discards the attempt in the librarian, then finishes it with o; a final refusal, such as a promotion in progress, still finishes it.
 func (r *ZimArchiveReconciler) discardAndFinish(ctx context.Context, za *v1alpha1.ZimArchive, lib *v1alpha1.KiwixLibrary, lc ArchiveLibrarian, before *v1alpha1.ZimArchiveStatus, o outcome) (ctrl.Result, error) {
-	id := za.Status.LastAttempt.ID
+	a := za.Status.LastAttempt
+	id := a.ID
+	// Discard is irreversible, so the outcome is written first: if the finishing write is lost, the discarded row finishes with it.
+	a.Result, a.Reason, a.Message = o.result, o.reason, o.msg
+	if err := r.saveStatus(ctx, za, before); err != nil {
+		return ctrl.Result{}, err
+	}
 	if _, err := lc.Discard(ctx, id); err != nil {
 		if libclient.Retryable(err) {
 			return ctrl.Result{}, fmt.Errorf("discard attempt %s: %w", id, err)
@@ -418,7 +428,12 @@ func (r *ZimArchiveReconciler) crawlJob(ctx context.Context, za *v1alpha1.ZimArc
 		return nil, nil
 	}
 	var job batchv1.Job
-	err := r.Get(ctx, client.ObjectKey{Namespace: za.Namespace, Name: jobName(za.Name, a.ID)}, &job)
+	key := client.ObjectKey{Namespace: za.Namespace, Name: jobName(za.Name, a.ID)}
+	err := r.Get(ctx, key, &job)
+	if apierrors.IsNotFound(err) {
+		// A missing Job discards the attempt, and the cache may not have a Job ensureJob has just created, so the API server confirms it.
+		err = r.apiReader.Get(ctx, key, &job)
+	}
 	if apierrors.IsNotFound(err) {
 		return nil, nil
 	}

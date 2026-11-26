@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -17,6 +18,9 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	"github.com/jacaudi/kiwix-operator/api/v1alpha1"
 	"github.com/jacaudi/kiwix-operator/internal/libapi"
@@ -1114,4 +1118,101 @@ func TestConditionTable(t *testing.T) {
 			}
 		})
 	}
+}
+
+// intercept routes the reconciler's client through funcs; its API reader stays on the plain fake.
+func (h *zaHarness) intercept(t *testing.T, funcs interceptor.Funcs) {
+	t.Helper()
+	wc, ok := h.c.(client.WithWatch)
+	require.True(t, ok, "the fake client is a WithWatch")
+	h.r.Client = interceptor.NewClient(wc, funcs)
+}
+
+// failStatusWriteAfterDiscard fails the first ZimArchive status write once the librarian has discarded an attempt.
+func (h *zaHarness) failStatusWriteAfterDiscard(t *testing.T) {
+	t.Helper()
+	failed := false
+	h.intercept(t, interceptor.Funcs{
+		SubResourceUpdate: func(ctx context.Context, c client.Client, sub string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+			if !failed && len(h.librarian.discarded) > 0 {
+				failed = true
+				return apierrors.NewConflict(schema.GroupResource{Group: "kiwix.jacaudi.dev", Resource: "zimarchives"}, obj.GetName(), errors.New("stale resourceVersion"))
+			}
+			return c.SubResource(sub).Update(ctx, obj, opts...)
+		},
+	})
+}
+
+func TestDiscardedOutcomeSurvivesLostStatusWrite(t *testing.T) {
+	t.Run("unchanged", func(t *testing.T) {
+		seed := withCurrent(withOpen(urlArchive(), libapi.KindFetch), 100, 1000)
+		seed.Spec.Notify.OnSuccess = true
+		h := newZAHarness(t, seed)
+		h.attemptIn(seed, libapi.StateStaged).Staged = &libapi.BookInfo{BookID: testBookID, ArticleCount: 100, SizeKiB: 1000, SHA256: testSHA}
+		h.failStatusWriteAfterDiscard(t)
+
+		_, err := h.reconcileErr(t, "file")
+		require.Error(t, err, "the status write after Discard fails")
+		h.reconcile(t, "file")
+
+		za := assertFinished(t, h, "file", v1alpha1.AttemptResultUnchanged, "")
+		assert.Empty(t, za.Status.LastAttempt.ID)
+		assert.Equal(t, "download matches current; nothing to promote", za.Status.LastAttempt.Message)
+		assert.Empty(t, h.hook.got(), "Unchanged never notifies")
+		assertArchiveCondition(t, za, v1alpha1.ConditionDegraded, metav1.ConditionFalse, v1alpha1.ReasonHealthy)
+	})
+	t.Run("gate rejected", func(t *testing.T) {
+		seed := withCurrent(withOpen(gatedSite(), libapi.KindUpload), 3531, 6835)
+		h := newZAHarness(t, seed)
+		h.attemptIn(seed, libapi.StateStaged).Staged = &libapi.BookInfo{BookID: newBookID, ArticleCount: 12, SizeKiB: 40}
+		h.failStatusWriteAfterDiscard(t)
+
+		_, err := h.reconcileErr(t, "site")
+		require.Error(t, err, "the status write after Discard fails")
+		h.reconcile(t, "site")
+
+		za := assertFinished(t, h, "site", v1alpha1.AttemptResultRejected, v1alpha1.ReasonGateRejected)
+		assert.Equal(t, "12 pages vs 3,531 current (needs 80%); kept current", za.Status.LastAttempt.Message)
+		assert.Equal(t, []string{"site refresh rejected"}, h.hook.got())
+		assertArchiveCondition(t, za, v1alpha1.ConditionDegraded, metav1.ConditionTrue, v1alpha1.ReasonGateRejected)
+	})
+}
+
+func TestPendingOutcomeKeepsAttemptOpen(t *testing.T) {
+	seed := withCurrent(withOpen(gatedSite(), libapi.KindUpload), 3531, 6835)
+	h := newZAHarness(t, seed)
+	h.attemptIn(seed, libapi.StateStaged).Staged = &libapi.BookInfo{BookID: newBookID, ArticleCount: 12, SizeKiB: 40}
+	h.failStatusWriteAfterDiscard(t)
+
+	_, err := h.reconcileErr(t, "site")
+	require.Error(t, err)
+
+	za := h.archive(t, "site")
+	a := za.Status.LastAttempt
+	assert.True(t, attemptOpen(a), "a pending outcome does not finish the attempt")
+	assert.Equal(t, v1alpha1.AttemptResultRejected, a.Result, "the decision is recorded before Discard")
+	assert.False(t, a.Notified)
+	assert.Empty(t, h.hook.got())
+	assert.False(t, dueInput(za).LastFailedOrRejected, "an open attempt's pending result is not a finished failure")
+}
+
+func TestJobNotYetCachedIsNotGone(t *testing.T) {
+	seed := withOpen(gatedSite(), libapi.KindUpload)
+	seed.Status.LastAttempt.JobCreated = true
+	h := newZAHarness(t, seed, crawlJobWith(seed, ""))
+	h.attemptIn(seed, libapi.StateRegistered)
+	h.intercept(t, interceptor.Funcs{
+		Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+			if _, ok := obj.(*batchv1.Job); ok {
+				return apierrors.NewNotFound(schema.GroupResource{Group: "batch", Resource: "jobs"}, key.Name)
+			}
+			return c.Get(ctx, key, obj, opts...)
+		},
+	})
+
+	res := h.reconcile(t, "site")
+
+	assert.Empty(t, h.librarian.discarded, "a Job missing only from the cache is not gone")
+	assert.True(t, attemptOpen(h.archive(t, "site").Status.LastAttempt))
+	assert.Equal(t, 15*time.Second, res.RequeueAfter)
 }
