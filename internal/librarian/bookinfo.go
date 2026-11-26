@@ -2,6 +2,7 @@ package librarian
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/xml"
@@ -15,6 +16,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 var (
@@ -26,12 +28,21 @@ var (
 	attrEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;", "'", "&apos;", "\t", "&#9;", "\n", "&#10;", "\r", "&#13;")
 )
 
+const (
+	// readTimeout is generous for kiwix-manage on a large ZIM, and finite so a hung one cannot hold the library lock.
+	readTimeout = 10 * time.Minute
+	// killGrace is how long Read waits for a killed kiwix-manage's output pipes to close.
+	killGrace = 2 * time.Second
+)
+
 // KiwixManage reads a book's metadata by running kiwix-manage against a scratch library.
 type KiwixManage struct {
 	// Bin is the kiwix-manage executable.
 	Bin string
 	// ScratchDir holds the throwaway library files; each is removed before Read returns.
 	ScratchDir string
+	// Timeout bounds one Read; zero means readTimeout.
+	Timeout time.Duration
 }
 
 // Read has kiwix-manage add zimPath to a scratch library and returns the Book from the <book/> element it wrote, with the path rewritten to the absolute zimPath and BookID in dashed lowercase form.
@@ -47,9 +58,14 @@ func (k KiwixManage) Read(ctx context.Context, zimPath string) (book Book, err e
 		}
 	}()
 
+	// Read runs under Store.mu, so a hung kiwix-manage must end here rather than stall the whole library.
+	ctx, cancel := context.WithTimeout(ctx, cmp.Or(k.Timeout, readTimeout))
+	defer cancel()
 	var stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, k.Bin, lib, "add", abs) //nolint:gosec // Bin is operator configuration and the arguments never reach a shell
 	cmd.Stderr = &stderr
+	// A grandchild that outlives the kill would otherwise keep the stderr pipe, and so Run, open.
+	cmd.WaitDelay = killGrace
 	if err := cmd.Run(); err != nil {
 		return Book{}, fmt.Errorf("kiwix-manage add %s: %w (stderr: %s)", abs, err, strings.TrimSpace(stderr.String()))
 	}

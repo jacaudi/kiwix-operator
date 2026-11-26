@@ -1,7 +1,10 @@
 package librarian
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -161,6 +164,37 @@ func TestBookFromLibrary(t *testing.T) {
 			}
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+// stubManage is a kiwix-manage that runs script, and a KiwixManage over it with the given timeout.
+func stubManage(t *testing.T, script string, timeout time.Duration) KiwixManage {
+	t.Helper()
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "kiwix-manage")
+	require.NoError(t, os.WriteFile(bin, []byte("#!/bin/sh\n"+script+"\n"), 0o600))
+	require.NoError(t, os.Chmod(bin, 0o700)) //nolint:gosec // the stub must be executable
+	return KiwixManage{Bin: bin, ScratchDir: dir, Timeout: timeout}
+}
+
+func TestKiwixManageReadTimesOut(t *testing.T) {
+	tests := []struct {
+		name   string
+		script string
+	}{
+		{name: "hung child", script: "sleep 30"},
+		{name: "grandchild holds stderr open", script: "sleep 30 &\nsleep 30"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			k := stubManage(t, tt.script, 200*time.Millisecond)
+			start := time.Now()
+
+			_, err := k.Read(t.Context(), filepath.Join(t.TempDir(), "a.zim"))
+
+			require.Error(t, err)
+			assert.Less(t, time.Since(start), 10*time.Second, "kiwix-manage must be killed at the deadline, not awaited")
 		})
 	}
 }
