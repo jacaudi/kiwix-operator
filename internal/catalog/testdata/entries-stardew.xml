@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom"
+      xmlns:dc="http://purl.org/dc/terms/"
+      xmlns:opds="https://specs.opds.io/opds-1.2"
+      xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/">
+  <id>7f2019fb-c7aa-2e07-fc45-9b8a7956817a</id>
+
+  <link rel="self"
+        href="/catalog/v2/entries?name=stardewvalleywiki_en_all&amp;count=-1"
+        type="application/atom+xml;profile=opds-catalog;kind=acquisition"/>
+  <link rel="start"
+        href="/catalog/v2/root.xml"
+        type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
+  <link rel="up"
+        href="/catalog/v2/root.xml"
+        type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
+
+  <title>Filtered Entries (name=stardewvalleywiki_en_all&amp;count=-1)</title>
+  <updated>2026-11-26T06:22:34Z</updated>
+  <totalResults>1</totalResults>
+  <startIndex>0</startIndex>
+  <itemsPerPage>1</itemsPerPage>
+  <entry>
+    <id>urn:uuid:9d0c43f0-562a-9c31-087d-ff5c8a29a53a</id>
+    <title>Stardew Valley Wiki</title>
+    <updated>2026-10-01T00:00:00Z</updated>
+    <summary>Everything about the country-life RPG</summary>
+    <language>eng</language>
+    <name>stardewvalleywiki_en_all</name>
+    <flavour></flavour>
+    <category></category>
+    <tags>gaming;stardewvalleywiki;_details:yes;_ftindex:yes;_pictures:yes;_videos:yes</tags>
+    <articleCount>2806</articleCount>
+    <mediaCount>5721</mediaCount>
+    <link rel="http://opds-spec.org/image/thumbnail"
+          href="/catalog/v2/illustration/9d0c43f0-562a-9c31-087d-ff5c8a29a53a/?size=48"
+          type="image/png;width=48;height=48;scale=1"/>
+    <link type="text/html" href="https://browse.library.kiwix.org/content/stardewvalleywiki_en_all_2026-10" />
+    <author>
+      <name>Stardewvalleywiki</name>
+    </author>
+    <publisher>
+      <name>openZIM</name>
+    </publisher>
+    <dc:issued>2026-10-01T00:00:00Z</dc:issued>
+    <link rel="http://opds-spec.org/acquisition/open-access" type="application/x-zim" href="https://lb.download.kiwix.org/zim/other/stardewvalleywiki_en_all_2026-10.zim.meta4" length="21849088" />
+  </entry>
+</feed>
