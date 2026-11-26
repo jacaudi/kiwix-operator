@@ -27,6 +27,8 @@ const (
 )
 
 var (
+	// ErrBusy means another body for the attempt is still being received; it is transient, so the server answers 503 with Retry-After and the uploader retries.
+	ErrBusy = errors.New("busy")
 	// ErrInvalid means a registration is malformed.
 	ErrInvalid = errors.New("invalid")
 	// ErrUnauthorized means the upload token does not match the attempt's token hash.
@@ -154,7 +156,12 @@ func (a *Attempts) beginPart(attempt, part, token, declaredSHA string, length in
 		}
 		return "", s.attempt(attempt), nil
 	}
-	if rec.State != libapi.StateRegistered {
+	switch rec.State {
+	case libapi.StateRegistered:
+	case libapi.StateReceiving:
+		// Clears once the earlier body ends, by completion, disconnect or IdleTimeout.
+		return "", st, fmt.Errorf("attempt %s is still receiving another body: %w", attempt, ErrBusy)
+	default:
 		return "", st, fmt.Errorf("attempt %s is %s, not registered: %w", attempt, rec.State, ErrConflict)
 	}
 	if err := a.checkSpace(length); err != nil {

@@ -26,6 +26,7 @@ const (
 	CodeUnauthorized      = "Unauthorized"
 	CodeNotFound          = "NotFound"
 	CodeConflict          = "Conflict"
+	CodeBusy              = "Busy"
 	CodeCurrentChanged    = "CurrentChanged"
 	CodeDuplicateBook     = "DuplicateBook"
 	CodeInsufficientSpace = "InsufficientSpace"

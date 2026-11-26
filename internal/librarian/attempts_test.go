@@ -513,6 +513,34 @@ func TestFailTerminalIsNoop(t *testing.T) {
 	require.ErrorIs(t, a.Fail(attB, libapi.CodeInternal, "x"), ErrNotFound)
 }
 
+func TestPartPutWhileReceivingIsBusy(t *testing.T) {
+	a, ts := newTestAttempts(t)
+	a.IdleTimeout = time.Minute
+	register(t, a, uploadReq(attA, "zim", "warcs"))
+	data := fixture(t, "small-a.zim")
+	body, w := io.Pipe()
+	done := make(chan error, 1)
+	go func() {
+		_, err := a.PutPart(t.Context(), attA, "zim", testToken, hexSHA(data), int64(len(data)), body)
+		done <- err
+	}()
+	// Returns once the stalled upload is reading, so the attempt is receiving.
+	_, err := w.Write(data[:10])
+	require.NoError(t, err)
+
+	for _, part := range []string{"zim", "warcs"} {
+		_, err = put(t, a, attA, part, data)
+		require.ErrorIs(t, err, ErrBusy, part)
+		assert.NotErrorIs(t, err, ErrConflict, part)
+	}
+	assert.Equal(t, libapi.StateReceiving, ts.state(attA))
+
+	_, err = w.Write(data[10:])
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
+	require.NoError(t, <-done)
+}
+
 func TestDiscardDuringUpload(t *testing.T) {
 	a, ts := newTestAttempts(t)
 	register(t, a, uploadReq(attA, "zim"))
