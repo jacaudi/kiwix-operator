@@ -35,6 +35,7 @@ import (
 	"github.com/jacaudi/kiwix-operator/internal/catalog"
 	"github.com/jacaudi/kiwix-operator/internal/controller"
 	"github.com/jacaudi/kiwix-operator/internal/libclient"
+	"github.com/jacaudi/kiwix-operator/internal/netguard"
 	"github.com/jacaudi/kiwix-operator/internal/notify"
 )
 
@@ -214,8 +215,11 @@ func gatewayAPIAvailable(ctx context.Context, d discovery.ServerResourcesInterfa
 // newReconcilers builds both reconcilers; the catalog and librarian clients share one HTTP client, each call bounded by its own timeout.
 func newReconcilers(f Flags, c client.Client, scheme *runtime.Scheme, rec events.EventRecorder, gatewayAPI bool) (*controller.KiwixLibraryReconciler, *controller.ZimArchiveReconciler) {
 	shared := &http.Client{}
-	// A followed 301/302/303 turns the webhook POST into a body-less GET that would report success.
-	webhook := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	// The webhook URL is a user's, so its transport refuses loopback and link-local destinations; a followed 301/302/303 would turn the POST into a body-less GET that reports success.
+	webhook := &http.Client{
+		Transport:     netguard.Transport(),
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
 	kl := &controller.KiwixLibraryReconciler{
 		Client:              c,
 		Scheme:              scheme,

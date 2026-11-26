@@ -21,6 +21,7 @@ import (
 
 	"github.com/jacaudi/kiwix-operator/api/v1alpha1"
 	"github.com/jacaudi/kiwix-operator/internal/libclient"
+	"github.com/jacaudi/kiwix-operator/internal/netguard"
 )
 
 // env is a getenv over the given key/value pairs.
@@ -284,6 +285,8 @@ func TestNotifierReportsRedirectAsFailure(t *testing.T) {
 	f.WebhookRetries = 0
 	c := fake.NewClientBuilder().Build()
 	_, za := newReconcilers(f, c, c.Scheme(), events.NewFakeRecorder(1), false)
+	// The guarded transport refuses the loopback test server; this test is about redirects, so it dials plainly.
+	za.Notifier.HTTP.Transport = nil
 
 	err := za.Notifier.Send(t.Context(), srv.URL+"/hook", "title", "message")
 
@@ -300,4 +303,19 @@ func TestRunFailsWithoutKubeconfig(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "kubeconfig")
+}
+
+func TestNotifierRefusesLocalDestinations(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Error("the webhook must not reach a loopback server")
+	}))
+	t.Cleanup(srv.Close)
+	f := wiringFlags()
+	f.WebhookRetries = 0
+	c := fake.NewClientBuilder().Build()
+	_, za := newReconcilers(f, c, c.Scheme(), events.NewFakeRecorder(1), false)
+
+	err := za.Notifier.Send(t.Context(), srv.URL+"/hook", "title", "message")
+
+	require.ErrorIs(t, err, netguard.ErrForbidden)
 }
