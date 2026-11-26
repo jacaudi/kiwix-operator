@@ -44,6 +44,14 @@ rules:
   - update
   - watch
 - apiGroups:
+  - ""
+  - events.k8s.io
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
   - apps
   resources:
   - deployments
@@ -70,12 +78,17 @@ rules:
   verbs:
   - update
 - apiGroups:
-  - events.k8s.io
+  - coordination.k8s.io
   resources:
-  - events
+  - leases
   verbs:
   - create
+  - delete
+  - get
+  - list
   - patch
+  - update
+  - watch
 - apiGroups:
   - gateway.networking.k8s.io
   resources:

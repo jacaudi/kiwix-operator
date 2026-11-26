@@ -1,0 +1,18 @@
+# A book downloaded from the Kiwix catalog and refreshed weekly when the catalog publishes a newer version.
+---
+apiVersion: kiwix.jacaudi.dev/v1alpha1
+kind: ZimArchive
+metadata:
+  name: wikipedia-en-100
+  namespace: default
+spec:
+  libraryRef:
+    name: library
+  source:
+    download:
+      catalog:
+        name: wikipedia_en_100
+        flavour: maxi
+  refresh:
+    schedule: "0 4 * * 0"
+  deletionPolicy: Delete

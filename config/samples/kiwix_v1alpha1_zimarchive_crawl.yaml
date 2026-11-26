@@ -1,0 +1,28 @@
+# A site crawled with zimit into the library on the first of each month, keeping the file when the archive is deleted.
+---
+apiVersion: kiwix.jacaudi.dev/v1alpha1
+kind: ZimArchive
+metadata:
+  name: go-dev
+  namespace: default
+spec:
+  libraryRef:
+    name: library
+  source:
+    crawl:
+      seeds:
+        - https://go.dev/doc/
+      scopeExcludeRx: "^https://go\\.dev/(play|dl)/"
+      workers: 4
+      title: Go documentation
+      timeout: 12h
+      scratch:
+        size: 20Gi
+  refresh:
+    schedule: "0 3 1 * *"
+    timeZone: UTC
+    minArticleRatio: 80
+    minSizeRatio: 80
+  notify:
+    onSuccess: true
+  deletionPolicy: Retain

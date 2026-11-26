@@ -43,8 +43,8 @@ func claimName(lib *v1alpha1.KiwixLibrary) string {
 	return dataClaimName(lib)
 }
 
-// librarianURL is the in-cluster base URL of a library's librarian API.
-func librarianURL(lib *v1alpha1.KiwixLibrary) string {
+// LibrarianURL is the in-cluster base URL of a library's librarian API.
+func LibrarianURL(lib *v1alpha1.KiwixLibrary) string {
 	return fmt.Sprintf("http://%s.%s.svc:%d", librarianSvcName(lib), lib.Namespace, librarianPort)
 }
 

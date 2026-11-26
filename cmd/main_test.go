@@ -168,3 +168,17 @@ func TestUploadSubcommandReportsEveryConfigProblem(t *testing.T) {
 	assert.Contains(t, errb.String(), "LIBRARIAN_URL is required")
 	assert.Contains(t, errb.String(), "ATTEMPT is required")
 }
+
+func TestManagerRejectsBadConfig(t *testing.T) {
+	for _, k := range []string{"OPERATOR_IMAGE", "ZIMIT_IMAGE", "POD_NAMESPACE"} {
+		t.Setenv(k, "")
+	}
+	var out, errb bytes.Buffer
+
+	code := run([]string{"manager"}, &out, &errb)
+
+	assert.Equal(t, 2, code)
+	assert.Contains(t, errb.String(), "--operator-image")
+	assert.Contains(t, errb.String(), "--operator-namespace")
+	assert.NotContains(t, errb.String(), "not yet wired")
+}

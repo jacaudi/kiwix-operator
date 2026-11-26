@@ -142,7 +142,7 @@ func buildCrawlJob(za *v1alpha1.ZimArchive, lib *v1alpha1.KiwixLibrary, attempt,
 		Image: operatorImage,
 		Args:  uploadArgs,
 		Env: []corev1.EnvVar{
-			{Name: librarianEnv, Value: librarianURL(lib)},
+			{Name: librarianEnv, Value: LibrarianURL(lib)},
 			{Name: attemptEnv, Value: attempt},
 		},
 		VolumeMounts:             []corev1.VolumeMount{output, {Name: "token", MountPath: kiwixRunDir, ReadOnly: true}},

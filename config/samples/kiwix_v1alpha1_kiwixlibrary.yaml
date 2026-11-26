@@ -1,0 +1,27 @@
+# A library on a 100Gi claim the operator creates, served at kiwix.example.com through the Gateway "internal",
+# allowing one download and one crawl at a time and posting notifications to a webhook.
+---
+apiVersion: kiwix.jacaudi.dev/v1alpha1
+kind: KiwixLibrary
+metadata:
+  name: library
+  namespace: default
+spec:
+  storage:
+    size: 100Gi
+  server:
+    blockExternalLinks: true
+  route:
+    parentRefs:
+      - name: internal
+        namespace: gateway
+    hostnames:
+      - kiwix.example.com
+  downloads:
+    maxConcurrent: 1
+  crawls:
+    maxConcurrent: 1
+  reserveSpace: 5Gi
+  notify:
+    webhook:
+      url: https://hooks.example.com/hooks/kiwix

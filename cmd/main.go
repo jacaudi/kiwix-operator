@@ -16,8 +16,13 @@ import (
 	"time"
 	_ "time/tzdata" // embeds the zone database, which the image does not ship
 
+	"github.com/go-logr/logr"
+	"k8s.io/klog/v2"
+	ctrl "sigs.k8s.io/controller-runtime"
+
 	"github.com/jacaudi/kiwix-operator/internal/libclient"
 	"github.com/jacaudi/kiwix-operator/internal/librarian"
+	"github.com/jacaudi/kiwix-operator/internal/manager"
 	"github.com/jacaudi/kiwix-operator/internal/upload"
 )
 
@@ -33,18 +38,11 @@ const adminTokenEnv = "KIWIX_LIBRARIAN_ADMIN_TOKEN"
 
 type subcommand func(args []string, stdout, stderr io.Writer) int
 
-// subcommands maps each role to its entry point; the not-yet-wired stubs are replaced as each role lands.
+// subcommands maps each role to its entry point.
 var subcommands = map[string]subcommand{
-	"manager":   notWired("manager"),
+	"manager":   runManager,
 	"librarian": runLibrarian,
 	"upload":    runUpload,
-}
-
-func notWired(name string) subcommand {
-	return func(_ []string, _, stderr io.Writer) int {
-		_, _ = fmt.Fprintf(stderr, "%s: not yet wired\n", name)
-		return 3
-	}
 }
 
 func versionString() string {
@@ -63,6 +61,37 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	_, _ = fmt.Fprintln(stderr, "usage: kiwix-operator <manager|librarian|upload>")
 	return 2
+}
+
+// runManager runs the controller manager until SIGINT or SIGTERM; a second signal kills a stuck shutdown.
+func runManager(args []string, stdout, stderr io.Writer) int {
+	f, err := manager.ParseFlags(args, os.Getenv)
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, err)
+		return 2
+	}
+	var level slog.Level
+	err = level.UnmarshalText([]byte(f.LogLevel))
+	logger, lerr := newLogger(stdout, f.LogFormat, level)
+	if err := errors.Join(err, lerr); err != nil {
+		_, _ = fmt.Fprintln(stderr, err)
+		return 2
+	}
+	// controller-runtime and client-go (leader election) log through these, so every line is in the chosen format.
+	ctrl.SetLogger(logr.FromSlogHandler(logger.Handler()))
+	klog.SetSlogLogger(logger)
+	f.UserAgent = "kiwix-operator/" + version
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	// After the first signal, restore the default handling so a second one kills the process.
+	context.AfterFunc(ctx, stop)
+	logger.Info("starting manager", "version", version, "commit", commit, "date", date)
+	if err := manager.Run(ctx, f); err != nil {
+		logger.Error("manager stopped", "error", err)
+		return 1
+	}
+	return 0
 }
 
 // runLibrarian runs the librarian sidecar until SIGINT or SIGTERM; a second signal kills a stuck shutdown.

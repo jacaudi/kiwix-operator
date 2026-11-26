@@ -1,0 +1,33 @@
+kiwix-operator has been deployed!
+
+{{- if .Values.rbac.enabled }}
+RBAC has been configured for the operator.
+{{- end }}
+
+To verify the deployment:
+  kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/name={{ include "bjw-s.common.lib.chart.names.name" . }}
+
+The chart installs the KiwixLibrary and ZimArchive CRDs. Create a library, then archives in its namespace:
+  apiVersion: kiwix.jacaudi.dev/v1alpha1
+  kind: KiwixLibrary
+  metadata:
+    name: library
+  spec:
+    storage:
+      size: 100Gi
+
+  apiVersion: kiwix.jacaudi.dev/v1alpha1
+  kind: ZimArchive
+  metadata:
+    name: wikipedia-en-100
+  spec:
+    libraryRef:
+      name: library
+    source:
+      download:
+        catalog:
+          name: wikipedia_en_100
+          flavour: maxi
+
+For more examples, see:
+  https://github.com/jacaudi/kiwix-operator/tree/main/config/samples

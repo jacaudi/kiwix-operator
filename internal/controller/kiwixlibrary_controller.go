@@ -274,7 +274,7 @@ func (r *KiwixLibraryReconciler) refreshAvailable(ctx context.Context, lib *v1al
 		setCondition(lib, v1alpha1.ConditionAvailable, metav1.ConditionFalse, v1alpha1.ReasonStarting, "kiwix-serve has no ready replica")
 		return nil
 	}
-	l, err := r.NewLibClient(librarianURL(lib), token).Library(ctx)
+	l, err := r.NewLibClient(LibrarianURL(lib), token).Library(ctx)
 	if err != nil {
 		setCondition(lib, v1alpha1.ConditionAvailable, metav1.ConditionFalse, v1alpha1.ReasonLibrarianUnreachable, err.Error())
 		return nil
