@@ -24,7 +24,6 @@ const (
 	ReasonUploading   = "Uploading"
 	ReasonDownloading = "Downloading"
 	ReasonPromoting   = "Promoting"
-	ReasonAdopting    = "Adopting"
 	ReasonQueued      = "Queued"
 	ReasonIdle        = "Idle"
 )
@@ -43,7 +42,6 @@ const (
 	ReasonAdoptFileMissing    = "AdoptFileMissing"
 	ReasonAdoptFileInvalid    = "AdoptFileInvalid"
 	ReasonAdoptConflict       = "AdoptConflict"
-	ReasonCurrentChanged      = "CurrentChanged"
 	ReasonCurrentLost         = "CurrentLost"
 	ReasonInvalidSchedule     = "InvalidSchedule"
 	ReasonLowSpace            = "LowSpace"
