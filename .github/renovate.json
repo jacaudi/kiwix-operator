@@ -1,0 +1,75 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "github>jacaudi/renovate-config:base",
+    "github>jacaudi/renovate-config:go",
+    "github>jacaudi/renovate-config:helm"
+  ],
+  "semanticCommitType": "deps",
+  "semanticCommitScope": null,
+  "commitMessagePrefix": "deps:",
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^taskfile\\.yml$/"
+      ],
+      "matchStrings": [
+        "CONTROLLER_TOOLS_VERSION:\\s*(?<currentValue>v[0-9.]+)"
+      ],
+      "depNameTemplate": "sigs.k8s.io/controller-tools",
+      "datasourceTemplate": "go"
+    },
+    {
+      "customType": "regex",
+      "description": "Tool pins annotated `# renovate: datasource=<ds> depName=<name>` (setup action: actionlint, golangci-lint, govulncheck, hadolint; ci-chart.yml: helm). Any number of `#` lines may sit between the annotation and the `KEY: value` line. From jacaudi/stormglass#295.",
+      "managerFilePatterns": [
+        "/\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\n(?:\\s*#[^\\n]*\\n)*\\s*\\w+: ['\"]?(?:[\\w-]+@)?(?<currentValue>[^\\s'\"]+)"
+      ]
+    },
+    {
+      "customType": "regex",
+      "description": "Digest-pinned images outside Dockerfiles and manifests Renovate already parses: zimit, the kind node and nginx in the chart values, taskfile and test fixtures. Tag and digest move together. Dockerfile FROM digests are covered by the built-in dockerfile manager.",
+      "managerFilePatterns": [
+        "/^chart/values\\.yaml$/",
+        "/^taskfile\\.yml$/",
+        "/^test/.+\\.ya?ml$/",
+        "/^test/.+\\.sh$/"
+      ],
+      "matchStrings": [
+        "(?<depName>(?:ghcr\\.io/openzim/zimit|kindest/node|nginx))[:](?<currentValue>[\\w.-]+)@(?<currentDigest>sha256:[0-9a-f]{64})"
+      ],
+      "datasourceTemplate": "docker"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "Regenerate CRDs and sync to Helm chart after controller-tools updates",
+      "matchDepNames": [
+        "sigs.k8s.io/controller-tools"
+      ],
+      "postUpgradeTasks": {
+        "commands": [
+          "task manifests",
+          "task sync-helm-crds"
+        ],
+        "fileFilters": [
+          "config/crd/bases/*.yaml",
+          "chart/crds/*.yaml"
+        ],
+        "executionMode": "branch"
+      }
+    },
+    {
+      "description": "golangci-lint and govulncheck must lead every Go toolchain bump (newer toolchains emit export data older lint builds cannot read); one PR moves all three. Mirrors jacaudi/stormglass.",
+      "matchDepNames": [
+        "golangci/golangci-lint",
+        "golang.org/x/vuln"
+      ],
+      "groupName": "go-toolchain"
+    }
+  ]
+}
