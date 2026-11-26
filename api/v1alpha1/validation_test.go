@@ -398,3 +398,54 @@ func TestTimeoutFormat(t *testing.T) {
 		})
 	}
 }
+
+func TestEmptyStringsRejected(t *testing.T) {
+	tests := []struct {
+		name string
+		obj  map[string]any
+		want string
+	}{
+		{
+			name: "existingClaim",
+			obj: map[string]any{
+				"kind":     "KiwixLibrary",
+				"metadata": map[string]any{"name": "empty-claim", "namespace": testNamespace},
+				"spec":     map[string]any{"storage": map[string]any{"existingClaim": ""}},
+			},
+			want: "existingClaim",
+		},
+		{
+			name: "url",
+			obj: map[string]any{
+				"kind":     "ZimArchive",
+				"metadata": map[string]any{"name": "empty-url", "namespace": testNamespace},
+				"spec": map[string]any{
+					"libraryRef": map[string]any{"name": "lib"},
+					"source":     map[string]any{"download": map[string]any{"url": ""}},
+				},
+			},
+			want: "url",
+		},
+		{
+			name: "libraryRef.name",
+			obj: map[string]any{
+				"kind":     "ZimArchive",
+				"metadata": map[string]any{"name": "empty-libref", "namespace": testNamespace},
+				"spec": map[string]any{
+					"libraryRef": map[string]any{"name": ""},
+					"source":     map[string]any{"crawl": map[string]any{"seeds": []any{"https://example.org"}}},
+				},
+			},
+			want: "libraryRef",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.obj["apiVersion"] = GroupVersion.String()
+
+			err := k8sClient.Create(t.Context(), &unstructured.Unstructured{Object: tt.obj})
+
+			requireInvalid(t, err, tt.want)
+		})
+	}
+}

@@ -201,7 +201,7 @@ func (r *KiwixLibraryReconciler) applyStorageAndNetwork(ctx context.Context, lib
 				pvc.Spec = corev1.PersistentVolumeClaimSpec{
 					AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
 					Resources:        corev1.VolumeResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceStorage: *size}},
-					StorageClassName: lib.Spec.Storage.StorageClassName,
+					StorageClassName: classOrNil(lib.Spec.Storage.StorageClassName),
 				}
 			}
 			return nil

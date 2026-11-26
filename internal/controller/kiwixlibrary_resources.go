@@ -191,3 +191,11 @@ func buildHTTPRoute(lib *v1alpha1.KiwixLibrary) *gwapiv1.HTTPRoute {
 		},
 	}
 }
+
+// classOrNil is a storage class name for a claim: an empty name means the cluster default, so it is omitted, never sent as "".
+func classOrNil(name *string) *string {
+	if name == nil || *name == "" {
+		return nil
+	}
+	return name
+}

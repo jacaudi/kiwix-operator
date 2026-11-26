@@ -35,6 +35,7 @@ const (
 type ZimArchiveSpec struct {
 	// LibraryRef names the KiwixLibrary in the same namespace; it cannot change after creation
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="libraryRef is immutable"
+	// +kubebuilder:validation:XValidation:rule="self.name.size() > 0",message="libraryRef.name must not be empty"
 	LibraryRef corev1.LocalObjectReference `json:"libraryRef"`
 
 	// Source says where the ZIM comes from
@@ -143,6 +144,7 @@ type DownloadSource struct {
 	Catalog *CatalogRef `json:"catalog,omitempty"`
 
 	// URL is a direct link to a ZIM file
+	// +kubebuilder:validation:MinLength=1
 	// +optional
 	URL string `json:"url,omitempty"`
 

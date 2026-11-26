@@ -80,6 +80,8 @@ spec:
                 x-kubernetes-validations:
                 - message: libraryRef is immutable
                   rule: self == oldSelf
+                - message: libraryRef.name must not be empty
+                  rule: self.name.size() > 0
               notify:
                 default: {}
                 description: Notify configures notifications for this archive
@@ -262,6 +264,7 @@ spec:
                         type: string
                       url:
                         description: URL is a direct link to a ZIM file
+                        minLength: 1
                         type: string
                     type: object
                     x-kubernetes-validations:

@@ -474,6 +474,7 @@ spec:
                   existingClaim:
                     description: ExistingClaim names a PersistentVolumeClaim in the
                       same namespace
+                    minLength: 1
                     type: string
                   size:
                     anyOf:

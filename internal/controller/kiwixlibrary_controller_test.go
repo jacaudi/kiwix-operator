@@ -680,3 +680,15 @@ func TestLibraryWatchIgnoresStatusOnlyUpdates(t *testing.T) {
 		})
 	}
 }
+
+func TestReconcilePVCEmptyStorageClassIsUnset(t *testing.T) {
+	lib := testLib()
+	lib.Spec.Storage.StorageClassName = new("")
+	h := newHarness(t, lib)
+
+	h.reconcile(t, "wiki")
+
+	var pvc corev1.PersistentVolumeClaim
+	h.get(t, "wiki-data", &pvc)
+	assert.Nil(t, pvc.Spec.StorageClassName, "an empty class must not be sent as \"\", which binds no claim")
+}

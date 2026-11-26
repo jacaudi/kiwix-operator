@@ -239,3 +239,19 @@ func TestCrawlObjectsLabelled(t *testing.T) {
 	assert.Equal(t, "site-abcdefgh-upload", secret.Name)
 	assert.Equal(t, []byte("tok"), secret.Data["token"])
 }
+
+func TestCrawlJobEmptyScratchClassIsUnset(t *testing.T) {
+	za := testCrawlArchive()
+	za.Spec.Source.Crawl.Scratch.StorageClassName = new("")
+	_, _, spec := buildTestJob(za)
+
+	var claim *corev1.PersistentVolumeClaimTemplate
+	for _, v := range spec.Volumes {
+		if v.Ephemeral != nil {
+			claim = v.Ephemeral.VolumeClaimTemplate
+		}
+	}
+
+	require.NotNil(t, claim)
+	assert.Nil(t, claim.Spec.StorageClassName, "an empty class must not be sent as \"\", which binds no claim")
+}

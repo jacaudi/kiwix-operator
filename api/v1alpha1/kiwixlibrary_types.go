@@ -46,6 +46,7 @@ type KiwixLibrarySpec struct {
 // +kubebuilder:validation:XValidation:rule="has(self.existingClaim) != has(self.size)",message="exactly one of existingClaim or size must be set"
 type StorageSpec struct {
 	// ExistingClaim names a PersistentVolumeClaim in the same namespace
+	// +kubebuilder:validation:MinLength=1
 	// +optional
 	ExistingClaim string `json:"existingClaim,omitempty"`
 

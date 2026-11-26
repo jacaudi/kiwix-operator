@@ -157,7 +157,7 @@ func buildCrawlJob(za *v1alpha1.ZimArchive, lib *v1alpha1.KiwixLibrary, attempt,
 				Spec: corev1.PersistentVolumeClaimSpec{
 					AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
 					Resources:        corev1.VolumeResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceStorage: c.Scratch.Size}},
-					StorageClassName: c.Scratch.StorageClassName,
+					StorageClassName: classOrNil(c.Scratch.StorageClassName),
 				},
 			},
 		}}},
