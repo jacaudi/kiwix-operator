@@ -284,28 +284,73 @@ func TestFetchAbortsAtReserve(t *testing.T) {
 			assert.NoFileExists(t, ts.stagedFile(attA, ".zim.part"))
 		})
 	}
-	t.Run("free space drops mid-download", func(t *testing.T) {
-		length := int64(spaceCheckEvery + 1<<20)
-		_, url := zimServer(t, func(w http.ResponseWriter, _ *http.Request) {
-			_, _ = io.Copy(w, io.LimitReader(zeros{}, length))
-		})
-		f, ts := newTestFetcher(t)
-		f.A.Reserve = 100
-		partial := ts.stagedFile(attA, ".zim.part")
-		ts.Free = func(string) (int64, error) {
-			if fileSize(partial) >= spaceCheckEvery {
-				return 0, nil
+	length := int64(spaceCheckEvery + 1<<20)
+	for _, tc := range []struct {
+		name     string
+		declared int64
+	}{
+		{"free space drops mid-download", length},
+		// No Size and no Content-Length, so the body is chunked and outruns its zero estimate at once.
+		{"chunked body runs past the reserve", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, url := zimServer(t, func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = io.Copy(w, io.LimitReader(zeros{}, length))
+			})
+			f, ts := newTestFetcher(t)
+			f.A.Reserve = 100
+			partial := ts.stagedFile(attA, ".zim.part")
+			ts.Free = func(string) (int64, error) {
+				if fileSize(partial) >= spaceCheckEvery {
+					return 50, nil
+				}
+				return 1 << 40, nil
 			}
-			return 1 << 40, nil
-		}
-		register(t, f.A, fetchFor(attA, url, "", length))
+			register(t, f.A, fetchFor(attA, url, "", tc.declared))
 
-		err := f.Run(t.Context(), attA)
+			err := f.Run(t.Context(), attA)
 
-		require.ErrorIs(t, err, ErrInsufficientSpace)
-		assert.Equal(t, libapi.CodeInsufficientSpace, ts.M.Attempts[attA].Code)
-		assert.NoFileExists(t, partial)
-	})
+			require.ErrorIs(t, err, ErrInsufficientSpace)
+			assert.Equal(t, libapi.CodeInsufficientSpace, ts.M.Attempts[attA].Code)
+			assert.NoFileExists(t, partial)
+		})
+	}
+}
+
+func TestFetchChecksDeclaredSize(t *testing.T) {
+	data := fixture(t, "small-a.zim")
+	size := int64(len(data))
+	tests := []struct {
+		name     string
+		declared int64
+		// held keeps the response open after the body, so only a reader that stops at the declared size sees the end.
+		held    bool
+		wantMsg string
+	}{
+		{"longer body", size - 10, false, "received more than declared size " + strconv.FormatInt(size-10, 10)},
+		{"longer body held open", size - 10, true, "received more than declared size " + strconv.FormatInt(size-10, 10)},
+		{"shorter body", size + 10, false, "received " + strconv.FormatInt(size, 10) + " of " + strconv.FormatInt(size+10, 10) + " bytes"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			h := serveData(data)
+			if tc.held {
+				h = stall(t, strconv.FormatInt(size+1, 10), data, len(data))
+			}
+			_, url := zimServer(t, h)
+			f, ts := newTestFetcher(t)
+			register(t, f.A, fetchFor(attA, url, "", tc.declared))
+
+			require.Error(t, f.Run(t.Context(), attA))
+
+			rec := ts.M.Attempts[attA]
+			assert.Equal(t, libapi.StateFailed, rec.State)
+			assert.Equal(t, libapi.CodeInternal, rec.Code)
+			assert.Contains(t, rec.Error, tc.wantMsg)
+			assert.NoFileExists(t, ts.stagedFile(attA, ".zim.part"))
+			assert.NoFileExists(t, ts.stagedFile(attA, ".zim"))
+		})
+	}
 }
 
 func TestFetchRejectsNegativeSize(t *testing.T) {

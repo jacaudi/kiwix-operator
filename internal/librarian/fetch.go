@@ -154,8 +154,8 @@ func (f *Fetcher) download(ctx context.Context, partial string, spec libapi.Fetc
 	if need < 0 {
 		return "", 0, fmt.Errorf("declared size %d leaves %d bytes to fetch after the %d kept", spec.Size, need, start)
 	}
-	// Keeps checkSpace's need+Reserve from overflowing on a hostile Content-Length.
-	need = min(need, math.MaxInt64-f.A.Reserve)
+	// Keeps need+1 and checkSpace's need+Reserve from overflowing on a hostile Content-Length.
+	need = min(need, math.MaxInt64-1-f.A.Reserve)
 	if err := f.A.checkSpace(need); err != nil {
 		return "", 0, err
 	}
@@ -170,18 +170,36 @@ func (f *Fetcher) download(ctx context.Context, partial string, spec libapi.Fetc
 	if _, err := file.Seek(start, io.SeekStart); err != nil {
 		return "", 0, fmt.Errorf("seek %s: %w", partial, err)
 	}
-	n, err := copyIdle(ctx, &spaceWriter{w: io.MultiWriter(file, h), a: f.A, left: need}, resp.Body, f.A.IdleTimeout)
+	var body io.Reader = resp.Body
+	if spec.Size > 0 {
+		// One byte past the declared size is enough to tell a longer body.
+		body = io.LimitReader(resp.Body, need+1)
+	}
+	n, err := copyIdle(ctx, &spaceWriter{w: io.MultiWriter(file, h), a: f.A, left: need}, body, f.A.IdleTimeout)
 	if err == nil {
 		err = file.Sync()
 	}
 	if err != nil {
 		return "", 0, fmt.Errorf("download into %s: %w", partial, err)
 	}
-	sum = hex.EncodeToString(h.Sum(nil))
-	if spec.SHA256 != "" && !strings.EqualFold(sum, spec.SHA256) {
-		return "", 0, fmt.Errorf("download hashes to %s, declared %s: %w", sum, spec.SHA256, ErrHashMismatch)
+	sum, size = hex.EncodeToString(h.Sum(nil)), start+n
+	if err := checkReceived(spec, sum, size); err != nil {
+		return "", 0, err
 	}
-	return sum, start + n, nil
+	return sum, size, nil
+}
+
+// checkReceived compares what arrived with the size and SHA-256 the spec declares, when it declares them.
+func checkReceived(spec libapi.FetchSpec, sum string, size int64) error {
+	switch {
+	case spec.Size > 0 && size > spec.Size:
+		return fmt.Errorf("received more than declared size %d", spec.Size)
+	case spec.Size > 0 && size < spec.Size:
+		return fmt.Errorf("received %d of %d bytes", size, spec.Size)
+	case spec.SHA256 != "" && !strings.EqualFold(sum, spec.SHA256):
+		return fmt.Errorf("download hashes to %s, declared %s: %w", sum, spec.SHA256, ErrHashMismatch)
+	}
+	return nil
 }
 
 // open requests rawURL from byte have on and returns the response with the offset its body starts at: have for a 206 starting there, 0 for a 200. A 416, or a 206 starting elsewhere, restarts from zero once; any other status is an error naming only the host.

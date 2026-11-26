@@ -45,7 +45,8 @@ func (sw *spaceWriter) Write(p []byte) (int, error) {
 	sw.since += int64(n)
 	if err == nil && sw.since >= spaceCheckEvery {
 		sw.since = 0
-		err = sw.a.checkSpace(sw.left)
+		// Floored at 0, so a body that outruns its estimate still keeps the reserve.
+		err = sw.a.checkSpace(max(sw.left, 0))
 	}
 	return n, err
 }
