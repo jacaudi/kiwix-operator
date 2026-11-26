@@ -690,3 +690,14 @@ func TestRepromoteClearsPendingUnlink(t *testing.T) {
 	assert.FileExists(t, ts.dataPath(armFile))
 	assert.Equal(t, uuidB, fresh.Current(armRef).BookID)
 }
+
+func TestAdoptRecordsSourceFingerprint(t *testing.T) {
+	ts := newTestStore(t)
+	place(t, ts.DataDir, "devdocs_en_go_2026-10.zim", "small-a.zim")
+
+	info, err := ts.Adopt(t.Context(), "docs", libapi.AdoptRequest{File: "devdocs_en_go_2026-10.zim", SourceFingerprint: "catalog:devdocs_en_go/"})
+
+	require.NoError(t, err)
+	assert.Equal(t, "catalog:devdocs_en_go/", info.SourceFingerprint)
+	assert.Equal(t, "catalog:devdocs_en_go/", ts.Current("docs").SourceFingerprint)
+}

@@ -135,7 +135,7 @@ func (f *fakeArchiveLibrarian) Adopt(_ context.Context, archive string, req liba
 	if f.adoptErr != nil {
 		return libapi.BookInfo{}, f.adoptErr
 	}
-	f.current = &libapi.BookInfo{Archive: archive, File: archive + ".zim", BookID: testBookID, ArticleCount: 10, SizeKiB: 100, SourceVersion: "2026-10"}
+	f.current = &libapi.BookInfo{Archive: archive, File: archive + ".zim", BookID: testBookID, ArticleCount: 10, SizeKiB: 100, SourceVersion: "2026-10", SourceFingerprint: req.SourceFingerprint}
 	return *f.current, nil
 }
 
@@ -406,7 +406,7 @@ func TestAdoptionBeforeDue(t *testing.T) {
 	h.reconcile(t, "docs")
 
 	require.Len(t, h.librarian.adopts, 1)
-	assert.Equal(t, libapi.AdoptRequest{File: "devdocs_en_go_2026-10.zim"}, h.librarian.adopts[0])
+	assert.Equal(t, libapi.AdoptRequest{File: "devdocs_en_go_2026-10.zim", SourceFingerprint: "catalog:devdocs_en_go/"}, h.librarian.adopts[0])
 	assert.Empty(t, h.librarian.registered)
 	assert.Zero(t, h.catalog.count())
 	za := h.archive(t, "docs")
@@ -838,4 +838,14 @@ func TestDueInputAwaitsAdoption(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func TestAdoptedArchiveDoesNotRefetch(t *testing.T) {
+	h := newZAHarness(t, requested(adoptingArchive("docs"), "r1"))
+	h.catalog.entries = []string{"devdocs_en_go//2026-10"}
+
+	h.reconcile(t, "docs")
+	h.reconcile(t, "docs")
+
+	assert.Empty(t, h.librarian.registered, "the adopted version is already the catalog's newest")
 }

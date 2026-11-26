@@ -149,7 +149,7 @@ func (r *ZimArchiveReconciler) adopt(ctx context.Context, za *v1alpha1.ZimArchiv
 	if winner != za.Name {
 		reason, msg = v1alpha1.ReasonAdoptConflict, fmt.Sprintf("ZimArchive %s, created first, also adopts %s", winner, file)
 	} else {
-		book, err := lc.Adopt(ctx, za.Name, libapi.AdoptRequest{File: file})
+		book, err := lc.Adopt(ctx, za.Name, libapi.AdoptRequest{File: file, SourceFingerprint: source.Fingerprint(za.Spec.Source)})
 		switch {
 		case errors.Is(err, libclient.ErrAdoptMissing):
 			reason, msg = v1alpha1.ReasonAdoptFileMissing, file+" is not on the library volume; remove adoptFile to fetch instead"

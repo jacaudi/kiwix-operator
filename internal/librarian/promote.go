@@ -146,6 +146,7 @@ func (s *Store) Adopt(ctx context.Context, archive string, req libapi.AdoptReque
 		return libapi.BookInfo{}, err
 	}
 	in.Current.SourceVersion = adoptVersion(req.File, book.Element)
+	in.Current.SourceFingerprint = req.SourceFingerprint
 	if err := s.begin(in); err != nil {
 		return libapi.BookInfo{}, err
 	}

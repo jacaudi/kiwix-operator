@@ -85,6 +85,7 @@ type PromoteRequest struct {
 type AdoptRequest struct {
 	File                  string `json:"file"`
 	ExpectedCurrentBookID string `json:"expectedCurrentBookID,omitempty"`
+	SourceFingerprint     string `json:"sourceFingerprint,omitempty"`
 }
 
 // BookInfo describes a book. Archive is empty for an unmanaged book.
