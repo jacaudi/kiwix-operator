@@ -8,11 +8,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -32,6 +34,7 @@ type Fetcher struct {
 
 	mu      sync.Mutex
 	running map[string]*fetchRun
+	stopped bool
 }
 
 // fetchRun is one Start goroutine. settling is set, under Fetcher.mu, once its download is over and it moves to its last state change, which can reach Cancel on this same goroutine through Store.OnTerminal.
@@ -41,11 +44,11 @@ type fetchRun struct {
 	settling bool
 }
 
-// Start runs Run for attempt in a goroutine with its own context; a Start while the attempt's goroutine is still running does nothing.
+// Start runs Run for attempt in a goroutine with its own context; a Start while the attempt's goroutine is still running, or after Stop, does nothing.
 func (f *Fetcher) Start(attempt string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if _, ok := f.running[attempt]; ok {
+	if _, ok := f.running[attempt]; ok || f.stopped {
 		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -83,6 +86,20 @@ func (f *Fetcher) Cancel(attempt string) {
 	}
 	// A partial left behind is removed with the attempt's record by GC.
 	_ = removeFile(f.A.S.partialPath(attempt, partZIM))
+}
+
+// Stop cancels every download and waits for its goroutine to exit, keeping the partial files so the next start resumes them with Range; Start does nothing afterwards.
+func (f *Fetcher) Stop() {
+	f.mu.Lock()
+	f.stopped = true
+	runs := slices.Collect(maps.Values(f.running))
+	f.mu.Unlock()
+	for _, r := range runs {
+		r.cancel()
+	}
+	for _, r := range runs {
+		<-r.done
+	}
 }
 
 // Run downloads a registered or receiving fetch attempt into staged/<attempt>.zim.part, resuming the bytes already there, then verifies and completes it. A download error fails the attempt with its code; a cancelled ctx returns without touching the attempt, leaving the partial to resume or to Cancel.

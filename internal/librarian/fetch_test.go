@@ -537,3 +537,31 @@ func TestRunRefusesOtherAttempts(t *testing.T) {
 	assert.Equal(t, libapi.StateRegistered, ts.state(attA))
 	assert.Equal(t, libapi.StateStaged, ts.state(attB))
 }
+
+func TestStopKeepsPartials(t *testing.T) {
+	data := fixture(t, "small-a.zim")
+	half := len(data) / 2
+	_, url := zimServer(t, stall(t, strconv.Itoa(len(data)), data, half))
+	f, ts := newTestFetcher(t)
+	ts.OnTerminal = f.Cancel
+	register(t, f.A, fetchFor(attA, url, hexSHA(data), int64(len(data))))
+	register(t, f.A, fetchFor(attB, url, hexSHA(data), int64(len(data))))
+	partial := ts.stagedFile(attA, ".zim.part")
+	f.Start(attA)
+	require.Eventually(t, func() bool { return fileSize(partial) == int64(half) }, 5*time.Second, 5*time.Millisecond)
+
+	f.Stop()
+
+	f.mu.Lock()
+	assert.Empty(t, f.running, "Stop returned before the fetch goroutine exited")
+	f.mu.Unlock()
+	assert.Equal(t, int64(half), fileSize(partial), "the partial is kept for a resume")
+	assert.Equal(t, libapi.StateReceiving, ts.state(attA))
+	assert.Empty(t, ts.terminal)
+
+	f.Start(attB)
+	f.mu.Lock()
+	assert.Empty(t, f.running, "Start after Stop runs nothing")
+	f.mu.Unlock()
+	assert.Equal(t, libapi.StateRegistered, ts.state(attB))
+}

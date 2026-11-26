@@ -23,7 +23,7 @@ type fixtureEntry struct {
 	ArticleCount int64  `json:"articleCount"`
 }
 
-func fixture(t *testing.T, file string) fixtureEntry {
+func fixtureMeta(t *testing.T, file string) fixtureEntry {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join(fixturesDir, "fixtures.json"))
 	require.NoError(t, err)
@@ -51,7 +51,7 @@ func newKiwixManage(t *testing.T) KiwixManage {
 }
 
 func TestKiwixManageReadsFixture(t *testing.T) {
-	want := fixture(t, "small-b.zim")
+	want := fixtureMeta(t, "small-b.zim")
 	path := fixturePath(t, "small-b.zim")
 
 	got, err := newKiwixManage(t).Read(t.Context(), path)

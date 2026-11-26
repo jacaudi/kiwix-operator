@@ -97,6 +97,16 @@ func (ts *testStore) pendingIntent(t *testing.T, attempt, expected string) Inten
 	return in
 }
 
+// denyWrites makes dir read-only so the next manifest save fails. Root writes through the mode, as in the kiwix test container, so the test is skipped there.
+func denyWrites(t *testing.T, dir string) {
+	t.Helper()
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions, so the save cannot be made to fail")
+	}
+	require.NoError(t, os.Chmod(dir, 0o500))
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o750) })
+}
+
 func (ts *testStore) lastChange(t *testing.T) Change {
 	t.Helper()
 	require.NotEmpty(t, ts.changes)
@@ -256,8 +266,7 @@ func TestFailedSaveLeavesMemoryAsOnDisk(t *testing.T) {
 	ts.stage(t, attA, armRef, "small-a.zim")
 	dir := filepath.Join(ts.DataDir, ".librarian")
 	require.NoError(t, ts.M.Save(dir))
-	require.NoError(t, os.Chmod(dir, 0o500))
-	t.Cleanup(func() { _ = os.Chmod(dir, 0o750) })
+	denyWrites(t, dir)
 
 	_, err := ts.Promote(t.Context(), attA, libapi.PromoteRequest{})
 

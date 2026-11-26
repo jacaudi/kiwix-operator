@@ -489,8 +489,7 @@ func TestDiscardFailedSaveKeepsFilesAndState(t *testing.T) {
 	ts.stage(t, attA, armRef, "small-a.zim")
 	dir := filepath.Join(ts.DataDir, ".librarian")
 	require.NoError(t, ts.M.Save(dir))
-	require.NoError(t, os.Chmod(dir, 0o500))
-	t.Cleanup(func() { _ = os.Chmod(dir, 0o750) })
+	denyWrites(t, dir)
 
 	require.Error(t, a.Discard(attA))
 
