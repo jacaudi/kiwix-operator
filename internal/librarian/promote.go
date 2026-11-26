@@ -222,14 +222,16 @@ func (s *Store) RollForward(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// One intent that cannot complete must not hold back the others, so every error is collected.
+	var errs []error
 	for _, in := range slices.Clone(s.M.Intents) {
 		t, err := s.rollForward(ctx, in)
 		terminal = append(terminal, t...)
 		if err != nil {
-			return fmt.Errorf("roll forward %s of %s: %w", in.Op, in.Archive, err)
+			errs = append(errs, fmt.Errorf("roll forward %s of %s: %w", in.Op, in.Archive, err))
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 func (s *Store) rollForward(ctx context.Context, in Intent) ([]string, error) {
@@ -262,7 +264,7 @@ func (s *Store) dropIntent(in Intent) ([]string, error) {
 	return terminal, s.save()
 }
 
-// intentFor makes every check a promotion or adoption needs before anything is written: no intent pending for the archive, the compare-and-swap, no other file serving the book, and a path rewrite that took.
+// intentFor makes every check a promotion or adoption needs before anything is written: no intent pending for the archive, the compare-and-swap, a rename that can succeed, no other file serving the book, and a path rewrite that took.
 func (s *Store) intentFor(op, archive, source, expected string, book Book) (Intent, error) {
 	if slices.ContainsFunc(s.M.Intents, func(in Intent) bool { return in.Archive == archive }) {
 		return Intent{}, fmt.Errorf("archive %s has a promotion in progress; retry once it completes: %w", archive, ErrConflict)
@@ -271,6 +273,9 @@ func (s *Store) intentFor(op, archive, source, expected string, book Book) (Inte
 		return Intent{}, fmt.Errorf("archive %s: current book is %q, expected %q: %w", archive, cur, expected, ErrCurrentChanged)
 	}
 	target := s.target(archive)
+	if err := renameable(source, target); err != nil {
+		return Intent{}, err
+	}
 	for file, b := range s.M.Books {
 		if path := filepath.Join(s.DataDir, file); b.BookID == book.BookID && path != target && path != source {
 			return Intent{}, fmt.Errorf("book %s is already served by %s; set adoptFile: %s to adopt that file instead: %w", book.BookID, file, file, ErrDuplicateBook)
@@ -284,6 +289,25 @@ func (s *Store) intentFor(op, archive, source, expected string, book Book) (Inte
 		Op: op, Archive: archive, Source: source, ExpectedCurrentBookID: expected, NewBookID: book.BookID, Book: book,
 		Current: ArchiveCurrent{File: filepath.Base(target), BookID: book.BookID, ArticleCount: book.ArticleCount, SizeKiB: book.SizeKiB},
 	}, nil
+}
+
+// renameable refuses a rename that would fail after the intent is saved: the source must be a regular file, and the target absent or a regular file.
+func renameable(source, target string) error {
+	switch st, err := os.Lstat(source); {
+	case err != nil:
+		return fmt.Errorf("stat source %s: %w", source, err)
+	case !st.Mode().IsRegular():
+		return fmt.Errorf("source %s is not a regular file", source)
+	}
+	switch st, err := os.Lstat(target); {
+	case errors.Is(err, fs.ErrNotExist):
+		return nil
+	case err != nil:
+		return fmt.Errorf("stat %s: %w", target, err)
+	case !st.Mode().IsRegular():
+		return fmt.Errorf("%s exists and is not a regular file; remove it so the archive can be promoted", target)
+	}
+	return nil
 }
 
 // begin saves the intent, clearing any pending unlink of the archive's file in the same save (protocol step 2).

@@ -388,6 +388,40 @@ func TestRollForwardAfterRename(t *testing.T) {
 	assert.Equal(t, uuidA, saved.Archives[armRef].BookID)
 }
 
+func TestPromoteRefusesDirectoryTarget(t *testing.T) {
+	ts := newTestStore(t)
+	ts.stage(t, attA, armRef, "small-a.zim")
+	require.NoError(t, os.Mkdir(ts.dataPath(armFile), 0o750))
+
+	_, err := ts.Promote(t.Context(), attA, libapi.PromoteRequest{})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), armFile)
+	assert.Empty(t, ts.M.Intents)
+	assert.Equal(t, libapi.StateStaged, ts.state(attA))
+	assert.FileExists(t, ts.stagedFile(attA, ".zim"))
+	assert.Empty(t, ts.changes)
+}
+
+func TestRollForwardContinuesPastFailingIntent(t *testing.T) {
+	ts := newTestStore(t)
+	ts.stage(t, attA, armRef, "small-a.zim")
+	ts.stage(t, attB, "other", "small-b.zim")
+	ts.pendingIntent(t, attA, "")
+	ts.pendingIntent(t, attB, "")
+	// A directory in the way makes the first intent's rename fail on every restart.
+	require.NoError(t, os.Mkdir(ts.dataPath(armFile), 0o750))
+
+	err := ts.RollForward(t.Context())
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), armRef)
+	require.NotNil(t, ts.Current("other"), "the second intent must still roll forward")
+	assert.Equal(t, uuidB, ts.Current("other").BookID)
+	assert.Equal(t, libapi.StatePromoted, ts.state(attB))
+	assert.Equal(t, []string{attB}, ts.terminal)
+}
+
 func TestRollForwardSourceGoneUUIDMismatch(t *testing.T) {
 	ts := newTestStore(t)
 	ts.stage(t, attA, armRef, "small-a.zim")
