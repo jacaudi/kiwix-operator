@@ -165,7 +165,14 @@ func (a *Attempts) beginPart(attempt, part, token, declaredSHA string, length in
 		return "", st, fmt.Errorf("attempt %s is %s, not registered: %w", attempt, rec.State, ErrConflict)
 	}
 	if err := a.checkSpace(length); err != nil {
-		return "", st, fmt.Errorf("part %s of %s: %w", part, attempt, err)
+		err = fmt.Errorf("part %s of %s: %w", part, attempt, err)
+		code, msg := refusal(err)
+		if code == "" {
+			return "", st, err
+		}
+		// The attempt stays registered, so the code is what tells the manager why the upload never staged.
+		s.setState(attempt, libapi.StateRegistered, code, msg)
+		return "", st, errors.Join(err, s.save())
 	}
 	partial = s.partialPath(attempt, part)
 	if err := os.MkdirAll(filepath.Dir(partial), 0o750); err != nil {
@@ -216,7 +223,8 @@ func (a *Attempts) endPart(ctx context.Context, attempt, part, partial, sha stri
 		rec := s.M.Attempts[attempt]
 		rec.PartialPath = ""
 		s.M.Attempts[attempt] = rec
-		s.setState(attempt, libapi.StateRegistered, "", "")
+		code, msg := refusal(err)
+		s.setState(attempt, libapi.StateRegistered, code, msg)
 		return st, errors.Join(err, removeFile(partial), s.save())
 	}
 	// The body is in; a client hanging up now must not fail the ZIM read.
@@ -281,6 +289,14 @@ func (a *Attempts) partDone(ctx context.Context, attempt, part, sha string, size
 	s.M.Attempts[attempt] = rec
 	s.setState(attempt, libapi.StateStaged, "", "")
 	return nil, s.save()
+}
+
+// refusal is the code and message a registered attempt carries after a body was refused for space; any other error leaves neither.
+func refusal(err error) (code, msg string) {
+	if errors.Is(err, ErrInsufficientSpace) {
+		return libapi.CodeInsufficientSpace, err.Error()
+	}
+	return "", ""
 }
 
 // placePart renames a received part to staged/<attempt>.<part> and syncs the directory.

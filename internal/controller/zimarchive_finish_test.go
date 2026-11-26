@@ -1216,3 +1216,17 @@ func TestJobNotYetCachedIsNotGone(t *testing.T) {
 	assert.True(t, attemptOpen(h.archive(t, "site").Status.LastAttempt))
 	assert.Equal(t, 15*time.Second, res.RequeueAfter)
 }
+
+func TestCrawlJobEndedWithInsufficientSpace(t *testing.T) {
+	seed := withOpen(gatedSite(), libapi.KindUpload)
+	seed.Status.LastAttempt.JobCreated = true
+	h := newZAHarness(t, seed, crawlJobWith(seed, batchv1.JobFailed), crawlPod(seed, exited(0, ""), exited(2, "upload gave up")))
+	st := h.attemptIn(seed, libapi.StateRegistered)
+	st.Code, st.Error = libapi.CodeInsufficientSpace, "1 bytes free, 9 needed plus the reserve"
+
+	h.reconcile(t, "site")
+
+	za := assertFinished(t, h, "site", v1alpha1.AttemptResultFailed, v1alpha1.ReasonInsufficientSpace)
+	assert.Equal(t, st.Error, za.Status.LastAttempt.Message)
+	assertArchiveCondition(t, za, v1alpha1.ConditionDegraded, metav1.ConditionTrue, v1alpha1.ReasonInsufficientSpace)
+}

@@ -108,7 +108,7 @@ func (r *ZimArchiveReconciler) track(ctx context.Context, za *v1alpha1.ZimArchiv
 	switch st.State {
 	case libapi.StateRegistered, libapi.StateReceiving:
 		if a.Kind == libapi.KindUpload {
-			return r.trackCrawl(ctx, za, lib, lc, job, before)
+			return r.trackCrawl(ctx, za, lib, lc, st, job, before)
 		}
 		if expired {
 			return r.discardAndFinish(ctx, za, lib, lc, before, failed(v1alpha1.ReasonDownloadFailed, "the download did not finish by its deadline"))
@@ -145,8 +145,8 @@ func (r *ZimArchiveReconciler) track(ctx context.Context, za *v1alpha1.ZimArchiv
 	return ctrl.Result{}, fmt.Errorf("attempt %s: unknown librarian state %q", a.ID, st.State)
 }
 
-// trackCrawl follows a crawl whose upload has not staged: it creates the Job, or ends the attempt once the Job has ended or is gone.
-func (r *ZimArchiveReconciler) trackCrawl(ctx context.Context, za *v1alpha1.ZimArchive, lib *v1alpha1.KiwixLibrary, lc ArchiveLibrarian, job *batchv1.Job, before *v1alpha1.ZimArchiveStatus) (ctrl.Result, error) {
+// trackCrawl follows a crawl whose upload has not staged: it creates the Job, or ends the attempt once the Job has ended or is gone; an upload the librarian refused for space ends it InsufficientSpace.
+func (r *ZimArchiveReconciler) trackCrawl(ctx context.Context, za *v1alpha1.ZimArchive, lib *v1alpha1.KiwixLibrary, lc ArchiveLibrarian, st libapi.AttemptState, job *batchv1.Job, before *v1alpha1.ZimArchiveStatus) (ctrl.Result, error) {
 	a := za.Status.LastAttempt
 	if a.JobCreated && job == nil {
 		return r.discardAndFinish(ctx, za, lib, lc, before, failed(v1alpha1.ReasonUploadFailed, "crawl Job gone"))
@@ -159,6 +159,10 @@ func (r *ZimArchiveReconciler) trackCrawl(ctx context.Context, za *v1alpha1.ZimA
 		}
 		if end := jobEnd(job); end != nil {
 			reason, msg := crawlFailure(end, pod)
+			if st.Code == libapi.CodeInsufficientSpace {
+				// The librarian refused the upload for space, which is why the Job ended.
+				reason, msg = failureReason(a.Kind, st.Code), cmp.Or(st.Error, msg)
+			}
 			return r.discardAndFinish(ctx, za, lib, lc, before, failed(reason, msg))
 		}
 	}

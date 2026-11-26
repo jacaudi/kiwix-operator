@@ -307,6 +307,16 @@ func (zeros) Read(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// assertSpaceRefusal checks that the registered attempt reports InsufficientSpace, as the manager reads it once the crawl Job ends.
+func assertSpaceRefusal(t *testing.T, a *Attempts) {
+	t.Helper()
+	st, err := a.Get(attA)
+	require.NoError(t, err)
+	assert.Equal(t, libapi.StateRegistered, st.State)
+	assert.Equal(t, libapi.CodeInsufficientSpace, st.Code)
+	assert.NotEmpty(t, st.Error)
+}
+
 func TestReserveAbortsWrite(t *testing.T) {
 	t.Run("before writing", func(t *testing.T) {
 		a, ts := newTestAttempts(t)
@@ -318,6 +328,7 @@ func TestReserveAbortsWrite(t *testing.T) {
 
 		require.ErrorIs(t, err, ErrInsufficientSpace)
 		assert.Equal(t, libapi.StateRegistered, ts.state(attA))
+		assertSpaceRefusal(t, a)
 		assert.NoFileExists(t, ts.stagedFile(attA, ".zim.part"))
 	})
 	t.Run("free space drops mid-write", func(t *testing.T) {
@@ -343,6 +354,7 @@ func TestReserveAbortsWrite(t *testing.T) {
 
 		require.ErrorIs(t, err, ErrInsufficientSpace)
 		assert.Equal(t, libapi.StateRegistered, ts.state(attA))
+		assertSpaceRefusal(t, a)
 		assert.NoFileExists(t, partial)
 		got, err := os.ReadFile(current)
 		require.NoError(t, err)
@@ -627,4 +639,25 @@ func TestSnapshotFreeBytes(t *testing.T) {
 	ts.Free = func(string) (int64, error) { return 0, errors.New("statfs failed") }
 	require.NoError(t, ts.Rescan(t.Context()))
 	assert.Zero(t, ts.Snapshot().Library.FreeBytes)
+}
+
+func TestSpaceRefusalClearsOnRetry(t *testing.T) {
+	a, ts := newTestAttempts(t)
+	a.Reserve = 100
+	data := fixture(t, "small-a.zim")
+	free := int64(len(data)) + 99
+	ts.Free = func(string) (int64, error) { return free, nil }
+	register(t, a, uploadReq(attA, "zim"))
+
+	_, err := put(t, a, attA, "zim", data)
+	require.ErrorIs(t, err, ErrInsufficientSpace)
+	assertSpaceRefusal(t, a)
+
+	free = 1 << 40
+	st, err := put(t, a, attA, "zim", data)
+
+	require.NoError(t, err)
+	assert.Equal(t, libapi.StateStaged, st.State)
+	assert.Empty(t, st.Code)
+	assert.Empty(t, st.Error)
 }
