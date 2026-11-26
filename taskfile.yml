@@ -132,7 +132,7 @@ tasks:
     desc: Run the controller locally
     deps: [generate, manifests]
     cmds:
-      - go run ./cmd
+      - go run ./cmd manager
 
   container-build:
     desc: Build container image
