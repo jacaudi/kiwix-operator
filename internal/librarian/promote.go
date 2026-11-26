@@ -121,11 +121,6 @@ func (s *Store) Promote(ctx context.Context, attempt string, req libapi.PromoteR
 	if terminal, err = s.finish(context.WithoutCancel(ctx), in, true); err != nil {
 		return libapi.BookInfo{}, err
 	}
-	if slices.Contains(rec.RegisterRequest.Parts, partWARCs) {
-		if err := s.moveWarcs(attempt, rec.Archive); err != nil {
-			return libapi.BookInfo{}, fmt.Errorf("attempt %s is promoted but its WARCs were not kept: %w", attempt, err)
-		}
-	}
 	return s.info(rec.Archive), nil
 }
 
@@ -322,7 +317,7 @@ func (s *Store) begin(in Intent) error {
 	return s.save()
 }
 
-// finish runs protocol steps 3 to 5 of a saved intent: rename the source over the archive's file, write library.xml, commit.
+// finish runs protocol steps 3 to 5 of a saved intent: rename the source over the archive's file, write library.xml, commit. A promotion's kept WARC tar moves right after the rename, so every path to the commit, roll-forward included, keeps it.
 func (s *Store) finish(ctx context.Context, in Intent, rename bool) ([]string, error) {
 	target := s.target(in.Archive)
 	if rename {
@@ -331,6 +326,11 @@ func (s *Store) finish(ctx context.Context, in Intent, rename bool) ([]string, e
 		}
 		if err := syncDir(s.DataDir); err != nil {
 			return nil, err
+		}
+	}
+	if in.Attempt != "" && slices.Contains(s.M.Attempts[in.Attempt].RegisterRequest.Parts, partWARCs) {
+		if err := s.moveWarcs(in.Attempt, in.Archive); err != nil {
+			return nil, fmt.Errorf("attempt %s: keep its WARCs: %w", in.Attempt, err)
 		}
 	}
 	c := Change{Present: map[string]string{in.NewBookID: zim.ContentID(target)}}
@@ -435,13 +435,17 @@ func (s *Store) removeStaged(attempt string) error {
 	return errors.Join(errs...)
 }
 
-// moveWarcs replaces the archive's WARC tar with the attempt's staged one.
+// moveWarcs replaces the archive's WARC tar with the attempt's staged one; a staged tar already gone was moved by an earlier pass of the same promotion.
 func (s *Store) moveWarcs(attempt, archive string) error {
+	src := s.stagedPath(attempt, "."+partWARCs)
+	if _, err := os.Lstat(src); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
 	dst := s.warcsPath(archive)
 	if err := os.MkdirAll(filepath.Dir(dst), 0o750); err != nil {
 		return fmt.Errorf("create %s: %w", filepath.Dir(dst), err)
 	}
-	if err := os.Rename(s.stagedPath(attempt, "."+partWARCs), dst); err != nil {
+	if err := os.Rename(src, dst); err != nil {
 		return fmt.Errorf("move WARCs of %s: %w", attempt, err)
 	}
 	return syncDir(filepath.Dir(dst))

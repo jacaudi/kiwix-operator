@@ -397,6 +397,52 @@ func TestRollForwardAfterRename(t *testing.T) {
 	assert.Equal(t, uuidA, saved.Archives[armRef].BookID)
 }
 
+func TestRollForwardMovesWarcs(t *testing.T) {
+	tests := []struct {
+		name        string
+		renameFirst bool
+	}{
+		{name: "before the rename"},
+		{name: "after the rename", renameFirst: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts := newTestStore(t)
+			tar := filepath.Join(ts.DataDir, ".librarian", "warcs", armRef+".tar")
+			ts.stage(t, attA, armRef, "small-a.zim", "zim", "warcs")
+			require.NoError(t, os.WriteFile(ts.stagedFile(attA, ".warcs"), []byte("new"), 0o600))
+			ts.pendingIntent(t, attA, "")
+			if tt.renameFirst {
+				require.NoError(t, os.Rename(ts.stagedFile(attA, ".zim"), ts.dataPath(armFile)))
+			}
+
+			require.NoError(t, ts.RollForward(t.Context()))
+
+			got, err := os.ReadFile(tar)
+			require.NoError(t, err)
+			assert.Equal(t, "new", string(got))
+			assert.NoFileExists(t, ts.stagedFile(attA, ".warcs"))
+			assert.Equal(t, libapi.StatePromoted, ts.state(attA))
+		})
+	}
+}
+
+func TestRollForwardKeepsWarcsAlreadyMoved(t *testing.T) {
+	ts := newTestStore(t)
+	tar := filepath.Join(ts.DataDir, ".librarian", "warcs", armRef+".tar")
+	require.NoError(t, os.MkdirAll(filepath.Dir(tar), 0o750))
+	require.NoError(t, os.WriteFile(tar, []byte("moved"), 0o600))
+	ts.stage(t, attA, armRef, "small-a.zim", "zim", "warcs")
+	ts.pendingIntent(t, attA, "")
+
+	require.NoError(t, ts.RollForward(t.Context()))
+
+	got, err := os.ReadFile(tar)
+	require.NoError(t, err)
+	assert.Equal(t, "moved", string(got), "a tar the crashed promotion already moved is left alone")
+	assert.Equal(t, libapi.StatePromoted, ts.state(attA))
+}
+
 func TestPromoteRefusesDirectoryTarget(t *testing.T) {
 	ts := newTestStore(t)
 	ts.stage(t, attA, armRef, "small-a.zim")
