@@ -2,6 +2,7 @@ package librarian
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -700,4 +701,42 @@ func TestAdoptRecordsSourceFingerprint(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "catalog:devdocs_en_go/", info.SourceFingerprint)
 	assert.Equal(t, "catalog:devdocs_en_go/", ts.Current("docs").SourceFingerprint)
+}
+
+func TestUnlinkIsDurableBeforeManifestForgetsIt(t *testing.T) {
+	ts := newTestStore(t)
+	ts.stage(t, attA, armRef, "small-a.zim")
+	ts.promote(t, attA, "")
+	var synced []string
+	ts.Sync = func(dir string) error {
+		synced = append(synced, dir)
+		assert.NoFileExists(t, ts.dataPath(armFile), "the directory is synced after the unlink")
+		m, _, err := LoadManifest(filepath.Join(ts.DataDir, ".librarian"))
+		require.NoError(t, err)
+		assert.Equal(t, []string{armFile}, m.PendingUnlinks, "the saved manifest keeps the file until the unlink is durable")
+		return nil
+	}
+
+	done, err := ts.Delete(t.Context(), armRef, "Delete")
+
+	require.NoError(t, err)
+	assert.True(t, done)
+	assert.Equal(t, []string{ts.DataDir}, synced)
+	assert.Empty(t, ts.M.PendingUnlinks)
+}
+
+func TestFailedUnlinkSyncKeepsPendingUnlink(t *testing.T) {
+	ts := newTestStore(t)
+	ts.stage(t, attA, armRef, "small-a.zim")
+	ts.promote(t, attA, "")
+	ts.Sync = func(string) error { return errors.New("fsync failed") }
+
+	done, err := ts.Delete(t.Context(), armRef, "Delete")
+
+	require.Error(t, err)
+	assert.False(t, done)
+	assert.Equal(t, []string{armFile}, ts.M.PendingUnlinks)
+	m, _, loadErr := LoadManifest(filepath.Join(ts.DataDir, ".librarian"))
+	require.NoError(t, loadErr)
+	assert.Equal(t, []string{armFile}, m.PendingUnlinks, "a retry must still know to unlink it")
 }

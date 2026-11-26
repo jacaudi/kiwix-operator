@@ -58,6 +58,8 @@ type Store struct {
 	Now func() time.Time
 	// Free measures the free bytes of the filesystem holding a directory; nil means FreeBytes.
 	Free func(dir string) (int64, error)
+	// Sync makes the unlinks in a directory durable; nil means syncDir.
+	Sync func(dir string) error
 
 	mu          sync.Mutex
 	unconfirmed bool
@@ -376,18 +378,33 @@ func (s *Store) write(ctx context.Context, c Change) (bool, error) {
 		return confirmed, nil
 	}
 	var errs []error
-	s.M.PendingUnlinks = slices.DeleteFunc(s.M.PendingUnlinks, func(name string) bool {
+	var settled []string
+	for _, name := range s.M.PendingUnlinks {
 		// A file served again is no longer to be unlinked, and leaving it listed would hide it from the next scan.
 		if _, ok := s.M.Books[name]; ok {
-			return true
+			settled = append(settled, name)
+			continue
 		}
 		if err := s.unlink(name); err != nil {
 			errs = append(errs, err)
-			return false
+			continue
 		}
-		return true
-	})
+		settled = append(settled, name)
+	}
+	// The unlinks must be durable before the manifest forgets the files, or a crash could bring one back unlisted.
+	if err := s.syncData(); err != nil {
+		s.publish()
+		return true, errors.Join(append(errs, err)...)
+	}
+	s.M.PendingUnlinks = slices.DeleteFunc(s.M.PendingUnlinks, func(name string) bool { return slices.Contains(settled, name) })
 	return true, errors.Join(append(errs, s.save())...)
+}
+
+func (s *Store) syncData() error {
+	if s.Sync == nil {
+		return syncDir(s.DataDir)
+	}
+	return s.Sync(s.DataDir)
 }
 
 // unlink removes a top-level file and, for an archive's file, the archive's WARC tar; a file already gone counts as removed.
