@@ -34,7 +34,7 @@ type Config struct {
 	Attempt, Token string
 	// KeepWarcs also uploads a tar of the crawl's WARCs as part "warcs".
 	KeepWarcs bool
-	// Budget bounds the total time spent backing off, and MaxBackoff each single wait.
+	// Budget is the total backoff sleep for the whole run, shared by every part and excluding transfer time; MaxBackoff caps each single wait.
 	Budget, MaxBackoff time.Duration
 	// Sleep waits between attempts; nil waits on the context's clock, so a signal ends the wait.
 	Sleep func(time.Duration)
@@ -113,11 +113,12 @@ type uploader struct {
 	client *libclient.Client
 	log    *slog.Logger
 	sleep  func(time.Duration)
+	// slept is the backoff spent so far by every part of the run, held against Config.Budget.
+	slept time.Duration
 }
 
 // put sends p, backing off between failures that a repeat may cure, until the budget is spent.
 func (u *uploader) put(ctx context.Context, p part) error {
-	var slept time.Duration
 	delay := min(initialBackoff, u.cfg.MaxBackoff)
 	for n := 1; ; n++ {
 		retry, err := u.putOnce(ctx, p)
@@ -127,8 +128,8 @@ func (u *uploader) put(ctx context.Context, p part) error {
 		if !retry || ctx.Err() != nil {
 			return fmt.Errorf("put part %s: %w", p.name, err)
 		}
-		if slept+delay >= u.cfg.Budget {
-			return fmt.Errorf("put part %s: gave up after %d attempts and %s of backoff: %w", p.name, n, slept, err)
+		if u.slept >= u.cfg.Budget {
+			return fmt.Errorf("put part %s: gave up after %d attempts and %s of backoff: %w", p.name, n, u.slept, err)
 		}
 		// Warn, not Info: a retry is a recoverable fault, and the ledgered ruling asks for one line each.
 		u.log.Warn("upload failed, retrying", "part", p.name, "attempt", n, "backoff", delay, "error", err)
@@ -136,7 +137,7 @@ func (u *uploader) put(ctx context.Context, p part) error {
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("put part %s: %w", p.name, err)
 		}
-		slept += delay
+		u.slept += delay
 		delay = min(delay*2, u.cfg.MaxBackoff)
 	}
 }

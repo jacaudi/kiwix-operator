@@ -300,9 +300,38 @@ func TestUploadGivesUpAtBudget(t *testing.T) {
 
 	require.ErrorIs(t, err, libclient.ErrBusy)
 	assert.ErrorContains(t, err, "gave up")
-	// 5s + 10s + 20s slept; the next 40s would take the total to 75s, past the 1m budget.
-	assert.Equal(t, []time.Duration{5 * time.Second, 10 * time.Second, 20 * time.Second}, *sleeps)
-	assert.Len(t, puts(), 4)
+	// Sleeps continue until the total reaches the budget: 5+10+20 is 35s, the 40s sleep makes 75s.
+	assert.Equal(t, []time.Duration{5 * time.Second, 10 * time.Second, 20 * time.Second, 40 * time.Second}, *sleeps)
+	var total time.Duration
+	for _, d := range *sleeps {
+		total += d
+	}
+	assert.GreaterOrEqual(t, total, time.Minute)
+	assert.Len(t, puts(), 5, "one last try after the sleep that spent the budget")
+}
+
+func TestUploadSharesBudgetAcrossParts(t *testing.T) {
+	dir := seedCrawl(t)
+	// The zim is refused three times, then accepted; the warcs part is refused every time.
+	c, puts := fakeLibrarian(t, func(n int) reply {
+		if n == 4 {
+			return ok
+		}
+		return busy()
+	})
+	cfg, sleeps := config(dir)
+	cfg.KeepWarcs = true
+	cfg.Budget = time.Minute
+	cfg.MaxBackoff = 60 * time.Second
+
+	err := Run(t.Context(), cfg, c)
+
+	require.ErrorIs(t, err, libclient.ErrBusy)
+	assert.ErrorContains(t, err, "put part warcs")
+	// The zim spends 35s of the one 1m budget; the warcs part, backing off afresh from 5s, has 25s left: 5s, 10s, then 20s crosses it.
+	s := time.Second
+	assert.Equal(t, []time.Duration{5 * s, 10 * s, 20 * s, 5 * s, 10 * s, 20 * s}, *sleeps)
+	assert.Len(t, puts(), 8)
 }
 
 func TestUploadRetryClassification(t *testing.T) {
