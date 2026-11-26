@@ -119,6 +119,14 @@ func TestEvaluateBadTimeZone(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestEvaluateRejectsZoneInSchedule(t *testing.T) {
+	for _, spec := range []string{"CRON_TZ=Europe/Paris 0 3 * * *", "TZ=UTC 0 3 * * *"} {
+		in := schedule.DueInput{HasCurrent: true, EverAttempted: true, Schedule: spec}
+		_, err := schedule.Evaluate(in, at(t, "2026-11-24T12:00:00Z"))
+		assert.Error(t, err, "schedule %q: spec.timeZone is the only time zone source", spec)
+	}
+}
+
 func TestEvaluateRequested(t *testing.T) {
 	in := schedule.DueInput{HasCurrent: true, EverAttempted: true, RequestedAt: "x"}
 	got, err := schedule.Evaluate(in, at(t, "2026-11-24T12:00:00Z"))

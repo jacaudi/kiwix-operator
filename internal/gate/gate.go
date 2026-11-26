@@ -14,6 +14,13 @@ type Counts struct {
 	ArticleCount, SizeKiB int64
 }
 
+// Pre-check kinds: where the candidate version comes from.
+const (
+	KindCatalog = "catalog"
+	KindURL     = "url"
+	KindCrawl   = "crawl"
+)
+
 // PreCheckInput is what the pre-download check knows about the current version and the candidate source.
 type PreCheckInput struct {
 	HasCurrent                                                                                       bool
@@ -26,9 +33,9 @@ func Unchanged(in PreCheckInput) bool {
 		return false
 	}
 	switch in.Kind {
-	case "catalog":
+	case KindCatalog:
 		return in.CandidateVersion <= in.CurrentVersion
-	case "url":
+	case KindURL:
 		return in.SpecSHA != "" && in.SpecSHA == in.CurrentSHA
 	default:
 		return false

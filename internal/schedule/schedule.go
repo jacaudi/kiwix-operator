@@ -3,6 +3,7 @@ package schedule
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/robfig/cron/v3"
@@ -94,6 +95,10 @@ func nextTick(sched cron.Schedule, loc *time.Location, now time.Time) time.Time 
 func parse(spec, zone string) (cron.Schedule, *time.Location, error) {
 	if spec == "" {
 		return nil, time.UTC, nil
+	}
+	// robfig/cron accepts a zone prefix, which would override spec.timeZone.
+	if strings.HasPrefix(spec, "CRON_TZ=") || strings.HasPrefix(spec, "TZ=") {
+		return nil, nil, fmt.Errorf("schedule %q: set the time zone in spec.refresh.timeZone, not in the schedule", spec)
 	}
 	loc := time.UTC
 	if zone != "" {

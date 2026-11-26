@@ -9,6 +9,12 @@ const (
 	KindFetch  = "fetch"
 )
 
+// Part names of an upload attempt.
+const (
+	PartZIM   = "zim"
+	PartWARCs = "warcs"
+)
+
 // Attempt states, persisted in the librarian manifest.
 const (
 	StateRegistered = "registered"

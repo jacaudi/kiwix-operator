@@ -7,6 +7,15 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - configmaps
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
   - persistentvolumeclaims
   - secrets
   - services
@@ -15,6 +24,14 @@ rules:
   - get
   - list
   - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - get
+  - list
   - watch
 - apiGroups:
   - apps
@@ -27,6 +44,21 @@ rules:
   - list
   - update
   - watch
+- apiGroups:
+  - batch
+  resources:
+  - jobs
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+- apiGroups:
+  - batch
+  resources:
+  - jobs/finalizers
+  verbs:
+  - update
 - apiGroups:
   - events.k8s.io
   resources:
@@ -49,6 +81,7 @@ rules:
   - kiwix.jacaudi.dev
   resources:
   - kiwixlibraries
+  - zimarchives
   verbs:
   - get
   - list
@@ -57,12 +90,14 @@ rules:
   - kiwix.jacaudi.dev
   resources:
   - kiwixlibraries/finalizers
+  - zimarchives/finalizers
   verbs:
   - update
 - apiGroups:
   - kiwix.jacaudi.dev
   resources:
   - kiwixlibraries/status
+  - zimarchives/status
   verbs:
   - get
   - update
