@@ -1,0 +1,6 @@
+# The tools image needs only the module files, its own sources and the fixture book.
+*
+!go.mod
+!go.sum
+!test/e2e/
+!test/fixtures/zim/

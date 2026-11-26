@@ -1,0 +1,112 @@
+# The e2e fake Kiwix catalog and webhook sink, both on port 8080, from the kiwix-e2e-tools:e2e image that task e2e loads into kind.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kiwix-e2e-tools
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fakecatalog
+  namespace: kiwix-e2e-tools
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: fakecatalog
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: fakecatalog
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: fakecatalog
+          image: kiwix-e2e-tools:e2e
+          imagePullPolicy: Never
+          command: ["/usr/local/bin/fakecatalog"]
+          args: ["--listen=:8080", "--file=/srv/book-01.zim"]
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /catalog/v2/entries
+              port: http
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fakecatalog
+  namespace: kiwix-e2e-tools
+spec:
+  selector:
+    app.kubernetes.io/name: fakecatalog
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sink
+  namespace: kiwix-e2e-tools
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sink
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: sink
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: sink
+          image: kiwix-e2e-tools:e2e
+          imagePullPolicy: Never
+          command: ["/usr/local/bin/sink"]
+          args: ["--listen=:8080"]
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /received
+              port: http
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sink
+  namespace: kiwix-e2e-tools
+spec:
+  selector:
+    app.kubernetes.io/name: sink
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

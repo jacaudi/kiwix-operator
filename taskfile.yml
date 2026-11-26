@@ -61,6 +61,32 @@ tasks:
       - docker build -f test/kiwix.Dockerfile -t kiwix-operator-test:local .
       - docker run --rm -v "$PWD:/src" -v kiwix-operator-gomod:/go/pkg/mod -w /src -e GOFLAGS=-buildvcs=false kiwix-operator-test:local go test -tags kiwix ./internal/librarian/... -race -v
 
+  # Every kind, kubectl and helm call uses the KUBECONFIG below, never the default one, and the tests refuse any other context.
+  e2e:
+    desc: Run the end-to-end tests in a throwaway kind cluster (needs docker, kind and helm; slow)
+    env:
+      KUBECONFIG: /tmp/kiwix-e2e.kubeconfig
+    vars:
+      KIND_NODE: kindest/node:v1.35.8@sha256:07b2536e30b803ed61d1677a79df6115f798ce64c80f9e22f6ed45afd09323c0
+      # Read from the files that run them, so the loaded image is always the one the site and the crawl Jobs ask for.
+      NGINX_IMAGE:
+        sh: yq 'select(.kind == "Deployment") | .spec.template.spec.containers[0].image' test/e2e/manifests/site.yaml
+      ZIMIT_IMAGE:
+        sh: yq '.zimit.image' chart/values.yaml
+    cmds:
+      - helm dependency build chart
+      - kind delete cluster --name kiwix-e2e --kubeconfig /tmp/kiwix-e2e.kubeconfig || true
+      - kind create cluster --name kiwix-e2e --image {{.KIND_NODE}} --kubeconfig /tmp/kiwix-e2e.kubeconfig
+      - defer: kind delete cluster --name kiwix-e2e --kubeconfig /tmp/kiwix-e2e.kubeconfig
+      - docker build -t kiwix-operator:e2e .
+      - docker build -f test/e2e/tools.Dockerfile -t kiwix-e2e-tools:e2e .
+      - docker pull {{.NGINX_IMAGE}}
+      - docker pull {{.ZIMIT_IMAGE}}
+      - kind load docker-image --name kiwix-e2e kiwix-operator:e2e kiwix-e2e-tools:e2e {{.NGINX_IMAGE}} {{.ZIMIT_IMAGE}}
+      - kubectl apply -f test/e2e/manifests/tools.yaml
+      - helm upgrade --install --kubeconfig /tmp/kiwix-e2e.kubeconfig kiwix-operator chart -n kiwix-system --create-namespace -f test/e2e/values.yaml --set "probeAllowCIDRs={$(docker network inspect kind -f '{{"{{"}}(index .IPAM.Config 0).Subnet{{"}}"}}')}"
+      - go test -tags e2e ./test/e2e/... -v -timeout 45m
+
   build:
     desc: Build the operator binary into ./bin/kiwix-operator
     cmds:
