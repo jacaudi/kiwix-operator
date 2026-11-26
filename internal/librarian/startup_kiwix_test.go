@@ -78,7 +78,9 @@ func librarianConfig(t *testing.T, dir string, kiwixPort int, logs io.Writer) Co
 		KiwixManageBin: "kiwix-manage",
 		MaxFetches:     1,
 		UserAgent:      "kiwix-operator/test",
-		Logger:         slog.New(slog.NewTextHandler(io.MultiWriter(logs, t.Output()), &slog.HandlerOptions{Level: slog.LevelDebug})),
+		// The test sources listen on loopback, which fetchClient refuses.
+		FetchHTTP: &http.Client{},
+		Logger:    slog.New(slog.NewTextHandler(io.MultiWriter(logs, t.Output()), &slog.HandlerOptions{Level: slog.LevelDebug})),
 	}
 }
 

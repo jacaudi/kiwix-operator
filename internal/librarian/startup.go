@@ -49,6 +49,8 @@ type Config struct {
 	MaxFetches int
 	// UserAgent is sent on every fetch request.
 	UserAgent string
+	// FetchHTTP is the client fetches download with; nil means fetchClient. A test whose source listens on loopback sets one that can reach it.
+	FetchHTTP *http.Client
 	// Logger receives startup, recovery and shutdown events; nil means slog.Default().
 	Logger *slog.Logger
 }
@@ -96,7 +98,11 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	store := NewStore(cfg.DataDir, m, w, km)
 	attempts := &Attempts{S: store, Reserve: cfg.Reserve, IdleTimeout: idleTimeout}
-	fetcher := &Fetcher{A: attempts, HTTP: fetchClient(), UserAgent: cfg.UserAgent, Sem: make(chan struct{}, cfg.MaxFetches)}
+	fetchHTTP := cfg.FetchHTTP
+	if fetchHTTP == nil {
+		fetchHTTP = fetchClient()
+	}
+	fetcher := &Fetcher{A: attempts, HTTP: fetchHTTP, UserAgent: cfg.UserAgent, Sem: make(chan struct{}, cfg.MaxFetches)}
 	store.OnTerminal = fetcher.Cancel
 	attempts.OnFetchRegistered = fetcher.Start
 
