@@ -237,3 +237,18 @@ func errorFrom(status int, body []byte) error {
 	}
 	return &apiError{status: status, msg: strconv.Quote(string(body[:min(len(body), maxErrorText)]))}
 }
+
+// Retryable reports whether repeating the call may succeed: a transport failure, Busy, Internal, or a 5xx reply that carries no code. Every other librarian reply is final; InsufficientSpace is a 5xx that retrying cannot fix.
+func Retryable(err error) bool {
+	ae, ok := errors.AsType[*apiError](err)
+	if !ok {
+		return true
+	}
+	switch ae.code {
+	case libapi.CodeBusy, libapi.CodeInternal:
+		return true
+	case "":
+		return ae.status >= 500
+	}
+	return false
+}

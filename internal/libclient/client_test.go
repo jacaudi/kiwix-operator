@@ -410,3 +410,53 @@ func TestPutPartHonorsCallerContext(t *testing.T) {
 
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
+
+func TestRetryable(t *testing.T) {
+	// A 5xx is not enough on its own: InsufficientSpace is a 507 and retrying cannot make room.
+	tests := []struct {
+		name   string
+		status int
+		code   string
+		body   string
+		want   bool
+	}{
+		{name: "busy", status: http.StatusServiceUnavailable, code: libapi.CodeBusy, want: true},
+		{name: "internal", status: http.StatusInternalServerError, code: libapi.CodeInternal, want: true},
+		{name: "proxy error without a code", status: http.StatusBadGateway, body: "bad gateway", want: true},
+		{name: "insufficient space", status: http.StatusInsufficientStorage, code: libapi.CodeInsufficientSpace},
+		{name: "conflict", status: http.StatusConflict, code: libapi.CodeConflict},
+		{name: "unauthorized", status: http.StatusUnauthorized, code: libapi.CodeUnauthorized},
+		{name: "hash mismatch", status: http.StatusUnprocessableEntity, code: libapi.CodeHashMismatch},
+		{name: "invalid zim", status: http.StatusUnprocessableEntity, code: libapi.CodeInvalidZim},
+		{name: "invalid", status: http.StatusBadRequest, code: libapi.CodeInvalid},
+		{name: "not found", status: http.StatusNotFound, code: libapi.CodeNotFound},
+		{name: "plain 404 without a code", status: http.StatusNotFound, body: "nope"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reply := tt.body
+			if tt.code != "" {
+				b, err := json.Marshal(libapi.ErrorBody{Code: tt.code, Message: "m"})
+				require.NoError(t, err)
+				reply = string(b)
+			}
+			c, _ := fixture(t, tt.status, reply)
+
+			err := c.PutPart(t.Context(), "abcdefg2", "zim", uploadToken, goodSHA, 1, strings.NewReader("x"))
+
+			require.Error(t, err)
+			assert.Equal(t, tt.want, Retryable(err))
+		})
+	}
+}
+
+func TestRetryableTransportError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	srv.Close()
+	c := &Client{BaseURL: srv.URL}
+
+	err := c.PutPart(t.Context(), "abcdefg2", "zim", uploadToken, goodSHA, 1, strings.NewReader("x"))
+
+	require.Error(t, err)
+	assert.True(t, Retryable(err), "a refused connection is a restarting pod")
+}

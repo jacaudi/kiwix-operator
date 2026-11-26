@@ -8,12 +8,17 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
+	"time"
 	_ "time/tzdata" // embeds the zone database, which the image does not ship
 
+	"github.com/jacaudi/kiwix-operator/internal/libclient"
 	"github.com/jacaudi/kiwix-operator/internal/librarian"
+	"github.com/jacaudi/kiwix-operator/internal/upload"
 )
 
 // Stamped at build time via -ldflags.
@@ -32,7 +37,7 @@ type subcommand func(args []string, stdout, stderr io.Writer) int
 var subcommands = map[string]subcommand{
 	"manager":   notWired("manager"),
 	"librarian": runLibrarian,
-	"upload":    notWired("upload"),
+	"upload":    runUpload,
 }
 
 func notWired(name string) subcommand {
@@ -100,6 +105,90 @@ func runLibrarian(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// tokenPath is where the crawl pod mounts the attempt's upload token; a variable so a test can point it elsewhere.
+var tokenPath = "/var/run/kiwix/token" //nolint:gosec // a file path, not a credential
+
+// Environment the crawl pod gives the upload container.
+const (
+	librarianURLEnv = "LIBRARIAN_URL"
+	attemptEnv      = "ATTEMPT"
+)
+
+// runUpload sends the finished crawl in --output to the librarian and exits 0 once it is stored; a bad configuration exits 2.
+func runUpload(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("upload", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var cfg upload.Config
+	fs.StringVar(&cfg.OutputDir, "output", "/output", "directory holding the crawl's ZIM and build dir")
+	fs.BoolVar(&cfg.KeepWarcs, "keep-warcs", false, "also upload a tar of the crawl's WARCs")
+	fs.DurationVar(&cfg.Budget, "budget", 6*time.Hour, "total time to keep retrying before giving up")
+	fs.DurationVar(&cfg.MaxBackoff, "max-backoff", 5*time.Minute, "longest wait between retries")
+	logFormat := fs.String("log-format", "json", "log format: json or text")
+	var logLevel slog.Level
+	fs.TextVar(&logLevel, "log-level", slog.LevelInfo, "log level: debug, info, warn or error")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	var errs []error
+	cfg.Attempt = os.Getenv(attemptEnv)
+	if cfg.Attempt == "" {
+		errs = append(errs, errors.New(attemptEnv+" is required"))
+	}
+	baseURL, err := librarianURL(os.Getenv(librarianURLEnv))
+	errs = append(errs, err)
+	cfg.Token, err = readToken(tokenPath)
+	errs = append(errs, err)
+	logger, err := newLogger(stdout, *logFormat, logLevel)
+	errs = append(errs, err)
+	if err := errors.Join(errs...); err != nil {
+		_, _ = fmt.Fprintln(stderr, err)
+		return 2
+	}
+	if err := cfg.Validate(); err != nil {
+		_, _ = fmt.Fprintln(stderr, err)
+		return 2
+	}
+	cfg.Logger = logger
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	// After the first signal, restore the default handling so a second one kills the process.
+	context.AfterFunc(ctx, stop)
+	logger.Info("uploading crawl", "attempt", cfg.Attempt, "output", cfg.OutputDir, "keepWarcs", cfg.KeepWarcs)
+	if err := upload.Run(ctx, cfg, &libclient.Client{BaseURL: baseURL}); err != nil {
+		logger.Error("upload failed", "error", err)
+		return 1
+	}
+	logger.Info("upload complete", "attempt", cfg.Attempt)
+	return 0
+}
+
+// librarianURL checks raw is an http(s) URL.
+func librarianURL(raw string) (string, error) {
+	if raw == "" {
+		return "", errors.New(librarianURLEnv + " is required")
+	}
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return "", fmt.Errorf("%s %q: want an http or https URL such as http://kiwix-librarian:8090", librarianURLEnv, raw)
+	}
+	return raw, nil
+}
+
+// readToken reads the upload token at path once, trimmed of whitespace.
+func readToken(path string) (string, error) {
+	b, err := os.ReadFile(path) //nolint:gosec // path is tokenPath, fixed by the pod spec
+	if err != nil {
+		return "", fmt.Errorf("read upload token: %w", err)
+	}
+	token := strings.TrimSpace(string(b))
+	if token == "" {
+		return "", fmt.Errorf("upload token file %s is empty", path)
+	}
+	return token, nil
 }
 
 // newLogger writes JSON or text logs at level to w.
