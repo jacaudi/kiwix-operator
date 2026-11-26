@@ -13,7 +13,7 @@ The operator replaces `jacaudi/kiwix-helm-chart` (decided: option A). It runs ki
 
 ## Guiding principles and references
 
-- **KISS / YAGNI:** two CRDs, one image, one writer of the library. No metrics, no zimit flag passthrough, no multi-version retention until a present need exists. Choices a user may reasonably want either way (creating the HTTPRoute, keeping WARCs) are settings, not hard-coded calls (user direction, 2026-11-24).
+- **KISS / YAGNI:** two CRDs, one image, one writer of the library. No operator-specific metrics, no zimit flag passthrough, no multi-version retention until a present need exists. Choices a user may reasonably want either way (creating the HTTPRoute, keeping WARCs) are settings, not hard-coded calls (user direction, 2026-11-24).
 - **DRY:** kiwix-tools is pinned once: the operator image's base. kiwix-serve, the librarian and `kiwix-manage` all run from that image, so they can't drift apart.
 - **Patchbay:** each source kind (`crawl`, `download`) is its own unit behind a shared "stage a ZIM in the librarian" contract. A new source kind (for example the `peer` source under consideration) is a new file plus wiring.
 - **SOLID:** the policy (health gate, schedule, catalog version) lives in the manager; the mechanics (staging, verification, promotion, `library.xml`) live in the librarian. The librarian's HTTP API is the boundary, and it exists because the two run in different pods.
@@ -37,7 +37,7 @@ The operator replaces `jacaudi/kiwix-helm-chart` (decided: option A). It runs ki
 - An approval step before a swap (rejected refresh option C).
 - A UI, authentication in front of kiwix-serve, or publishing ZIMs anywhere.
 - **Federation between libraries** (user decision, 2026-11-24). Planned follow-up: a `peer` source kind (see Approaches).
-- Prometheus metrics in v1 (status, conditions and Events cover visibility).
+- Operator-specific Prometheus metrics in v1 (status, conditions and Events cover visibility). The manager still serves controller-runtime's default metrics endpoint on `:8080`, and the chart publishes it as the `metrics` Service port; probes are on `:8081`.
 - A passthrough for arbitrary zimit flags. Typed fields cover what is used today.
 - The home-ops migration itself (a follow-up MR in `n7knightone/home-ops`; this design only guarantees the adoption features it needs).
 
@@ -52,10 +52,10 @@ The operator replaces `jacaudi/kiwix-helm-chart` (decided: option A). It runs ki
 ## Constraints
 
 - Cluster: Talos, Kubernetes 1.35.10, Flux, Cilium, ceph-block (RWO) as the default storage class. No Docker socket on nodes.
-- Language and layout: Go 1.27, controller-runtime 0.25, k8s libraries 0.37, following `jacaudi/nextdns-operator` `main` (`api/v1alpha1`, `cmd/`, `internal/controller`, `chart/` with CRDs synced in, `taskfile.yml`, release-please). CI follows the `github-actions-align` standard: local reusable workflows, a lowercase `taskfile.yml` contract, release-please, one required status check named `ci` that runs on every PR.
+- Language and layout: Go 1.27, controller-runtime 0.25, k8s libraries 0.37, following `jacaudi/nextdns-operator` `main` (`api/v1alpha1`, `cmd/`, `internal/controller`, `chart/` with CRDs synced in, `taskfile.yml`, release-please). CI follows the `github-actions-align` standard: local reusable workflows, a lowercase `taskfile.yml` contract, release-please, one required status check named `ci`. It runs on every push, and for an open PR's branch that is the PR's check. A pull request from a fork gets no `ci` check; that is accepted for a single-maintainer repo and documented in `.github/WORKFLOWS.md` (a `pull_request` trigger with a job-level `if` would leave a skipped duplicate `ci` that counts as passing).
 - API group `kiwix.jacaudi.dev`, version `v1alpha1`.
 - kiwix-tools 3.8.2 (current; 3.8.1 fixed the `kiwix-manage remove` bug seen in 3.8.0).
-- Default images (the operator image and the zimit image) are **manager flags set from chart values**, pinned by digest there, and tracked by Renovate. They are never CRD `default:` markers, which would freeze an image into each CR at creation.
+- Default images (the operator image and the zimit image) are **manager flags set from chart values**. The zimit image is pinned by digest and tracked by Renovate. The operator image is referenced by tag, which defaults to the chart's `appVersion` and has no digest (it is the image this release builds). They are never CRD `default:` markers, which would freeze an image into each CR at creation.
 - Notifications must work with the existing chaski service: `POST http://chaski.tools.svc.cluster.local:8080/hooks/<route>` with `{"title","message"}`, which forwards to Pushover (the pattern ytdl-api uses). A `kiwix` route in chaski is home-ops config, not operator code.
 
 ## Approaches considered
@@ -157,7 +157,7 @@ status:
   conditions: [Available, Degraded]
   books: 11
   freeBytes: 99000000000
-  unmanagedFiles: [{name: bg3.wiki_0e9fc406.zim}, {name: broken.zim, error: "kiwix-manage add failed: …"}]
+  unmanagedFiles: [{name: broken.zim, error: "kiwix-manage add failed: …"}]   # only files that could not be served; `error` is always set
 ```
 
 The operator creates:
@@ -169,7 +169,7 @@ The operator creates:
 - HTTPRoute `<library>` → Service `<library>`, backend port `8080` (Gateway API takes a port number, not a name), only when `route` is set. If the Gateway API CRDs aren't installed, the library reports `Degraded/RouteUnsupported` and keeps serving; the manager doesn't fail to start. When `route` is removed, the controller deletes the HTTPRoute explicitly (an owner reference alone doesn't do that);
 - the PVC `<library>-data` when `storage.size` is set. The PVC gets **no** owner reference, so deleting the `KiwixLibrary` never deletes ZIM data, and re-creating a library with the same name re-uses the PVC.
 
-**One writer, enforced:** the librarian holds an exclusive `flock` on `/data/.librarian/lock` for its whole life and refuses to start without it. The manager also rejects a second `KiwixLibrary` naming a claim another library already uses (`Degraded/ClaimInUse`). ReadWriteOnce alone allows several pods on one node, so it isn't enough.
+**One writer, enforced:** the librarian holds an exclusive `flock` on `/data/.librarian/lock` for its whole life and refuses to start without it. The manager also rejects a second `KiwixLibrary` naming a claim another library already uses (`Degraded/ClaimInUse`; the older library wins, then the lower name). A library that loses its claim to an older one has the Deployment it controls deleted, so no second pod can mount the claim; its Services, Secret and NetworkPolicies stay. ReadWriteOnce alone allows several pods on one node, so it isn't enough.
 
 **Probes:**
 - Librarian: a `startupProbe` that passes once the lock is held and `library.xml` is rendered, plus a `livenessProbe`. **No readinessProbe**, because a sidecar's readiness counts toward Pod readiness and would take kiwix-serve out of its Service.
@@ -181,7 +181,7 @@ The operator creates:
 
 **kiwix-serve arguments:** `--library /data/library.xml --monitorLibrary --port 8080`, plus `--blockexternal` when set. Date aliases stay off, the default, because filenames are stable (below). The flag `--nodatealiases` *enables* them despite its name; it is never passed.
 
-**Accepted cost of one image:** every operator release changes the image, which recreates the kiwix pod and briefly interrupts kiwix-serve.
+**Accepted cost of one image:** every operator release changes the image, which recreates the kiwix pod and briefly interrupts kiwix-serve. The librarian's `--max-fetches` (from `downloads.maxConcurrent`) and `--reserve-space` (from `reserveSpace`) are pod-template arguments too, so changing either field recreates the pod with the same brief interruption.
 
 ### `ZimArchive`
 
@@ -219,14 +219,33 @@ status:
   observedGeneration: 2
   conditions: [Available, Progressing, Degraded]
   current: {file: arm-reference.zim, bookId, articleCount, sizeKiB, sha256, sourceVersion, promotedAt}
-  lastAttempt: {id, startedAt, finishedAt, result: Succeeded|Rejected|Failed|Unchanged, message, notified}
+  lastAttempt: {id, kind: upload|fetch, trigger: initial|schedule|requested|backoff, requestedAt, scheduleTick,
+                startedAt, finishedAt, deadline, jobCreated, sourceVersion,
+                result: Succeeded|Rejected|Failed|Unchanged, reason, message, notified}
   lastFailureNotifiedAt: …       # rate-limits failure notifications
   failedAttempts: 0              # consecutive failures while there is no current version (drives backoff)
   lastHandledRequestedAt: "…"
+  lastScheduledAt: …             # the last schedule tick acted on
   nextRefreshAt: …
+  finalizerFirstFailureAt: …     # when deletion first failed or stayed pending (times the 10-minute give-up)
+  adoptMissingNotified: false    # the missing-adoptFile notification went out
 ```
 
-**`sourceVersion`** is always normalized to `YYYY-MM`: from a catalog file name's `_YYYY-MM` suffix, an adopted file name's suffix, or the first 7 characters of the ZIM's `Date` metadata.
+An attempt ends `Unchanged` with an empty `id` and `startedAt` equal to `finishedAt`, so it is never open. `kind` is the librarian's attempt kind (below); `trigger` says why the attempt started, and `requestedAt` and `scheduleTick` record the annotation value or tick that did, so a trigger is consumed exactly once. `sourceVersion` on an attempt is the catalog version a fetch downloads, recorded before registration so the promotion can name it without asking the catalog again.
+
+**Validation and defaults** (CEL and OpenAPI markers on the CRDs):
+- `crawl.workers` is 1 to 16 (default 4).
+- `crawl.timeout` matches a Go-duration pattern, must be a duration of at most 8760h, and defaults to 48h; the controller treats `0s` as that default.
+- `minArticleRatio` and `minSizeRatio` are 0 to 100 (default 80).
+- `maxConcurrent` is at least 1 (default 1).
+- `download.sha256` is 64 lowercase hex characters.
+- `storage.existingClaim`, `download.url` and `libraryRef.name` are never empty strings, and an empty `storageClassName` is treated as unset.
+
+**`sourceVersion`** is always normalized to `YYYY-MM`, and the manager computes it per source:
+- **catalog:** the entry's version, from its file name's `_YYYY-MM` suffix, else the month of the entry's `<updated>` date (the live feed has no `<version>`);
+- **url:** the `_YYYY-MM` in the URL's file name, else the promotion month;
+- **crawl:** the promotion month (UTC), the single source of truth in the manager, since it is the crawl's month in practice (a month off at a month boundary is the accepted cost). The ZIM's `Date` metadata is not read for crawls or URLs;
+- **adopted file:** its file name's suffix, else the month of the book's `date` attribute.
 
 **`sourceFingerprint`** identifies where the current version came from: `crawl:<sha256 of the sorted seeds>`, `catalog:<name>/<flavour>`, or `url:<url>`. It is stored with the current version. The pre-download checks only apply when it matches the spec, so switching a catalog archive from `maxi` to `nopic` in the same month fetches instead of reporting `Unchanged`. An archive that inherits a retained file from a different source therefore always refetches. The health gate still applies; to accept a deliberately smaller new source, set both ratios to 0 for one refresh.
 
@@ -235,10 +254,16 @@ status:
 | Kind | Type | Reasons |
 |---|---|---|
 | ZimArchive | `Available` | True: `Served`. False: `NotYetFetched`, `AwaitingAdoption`, `LibraryUnavailable` |
-| ZimArchive | `Progressing` | True: `Crawling`, `Uploading`, `Downloading`, `Promoting`, `Adopting`, `Queued`. False: `Idle` |
-| ZimArchive | `Degraded` | True: `CrawlFailed`, `UploadFailed`, `DownloadFailed`, `HashMismatch`, `GateRejected`, `InsufficientSpace`, `CatalogLookupFailed`, `DuplicateBook`, `AdoptFileMissing`, `AdoptFileInvalid`, `AdoptConflict`, `CurrentChanged`. False: `Healthy` |
+| ZimArchive | `Progressing` | True: `Crawling`, `Uploading`, `Downloading`, `Promoting`, `Queued`. False: `Idle` |
+| ZimArchive | `Degraded` | True: `CrawlFailed`, `UploadFailed`, `DownloadFailed`, `HashMismatch`, `GateRejected`, `InsufficientSpace`, `CatalogLookupFailed`, `DuplicateBook`, `AdoptFileMissing`, `AdoptFileInvalid`, `AdoptConflict`, `InvalidSchedule`, `LibraryUnavailable`. False: `Healthy` |
 | KiwixLibrary | `Available` | True: `Serving`. False: `Starting`, `LibrarianUnreachable` |
 | KiwixLibrary | `Degraded` | True: `LowSpace`, `UnmanagedFileErrors`, `ReloadUnconfirmed`, `RouteUnsupported`, `ClaimInUse`. False: `Healthy` |
+
+Notes on the table:
+- **No `Adopting` and no `CurrentChanged` reason.** Adoption completes inside one reconcile, so a `Progressing=Adopting` state is never observable. After a second `409 CurrentChanged` the attempt stays staged and the controller polls again in 15 s, so there is nothing to report as `Degraded`.
+- **`InvalidSchedule`** is set for a bad cron expression, a bad time zone or a `CRON_TZ=` prefix, and clears when the spec is fixed; no requeue happens until the spec changes.
+- **`Degraded/LibraryUnavailable`** is carried from an attempt that failed because its library was gone, or because its librarian was unreachable for an hour past the attempt's deadline. While the library is merely unreachable, `Available=False/LibraryUnavailable` is the signal.
+- **`CurrentLost`** is a Warning Event reason, not a condition reason (below).
 
 No `status.phase` field (Kubernetes API conventions discourage it).
 
@@ -256,6 +281,7 @@ No `status.phase` field (Kubernetes API conventions discourage it).
 - A `requestedAt` change during an attempt is handled once that attempt ends.
 - Ticks missed while the operator was down cause one attempt at startup, not a backfill.
 - **Failure notifications:** the first failure always notifies; repeats during backoff notify at most once per 24 h.
+- **A lost current version:** each reconcile mirrors the librarian's current book into `status.current`. When the librarian reports none but `status.current` is set, for example after the file was removed by hand, the manager clears `status.current` and `status.lastAttempt` and records a `CurrentLost` Warning Event. The archive then counts as never attempted: it is due at once with trigger `initial`, the first-version gate applies (`articleCount ≥ 1`, not the refresh ratios), and the failure backoff starts over. A lost current therefore puts the archive back under the first-version gate.
 
 ### Files, ownership and crash safety
 
@@ -264,7 +290,7 @@ No `status.phase` field (Kubernetes API conventions discourage it).
 - Its URL is `/content/<archive>` for life.
 - Rolling back to the chart's `/data/*.zim` glob still serves it.
 
-**Unmanaged files** are every other top-level `*.zim`: names that aren't a DNS label, such as `wikipedia_en_100_2025-10.zim`. They are served as is. A file that fails `kiwix-manage add` (libzim rejects truncated files) is listed in `status.unmanagedFiles` with its error and not served. The librarian scans `/data` at startup.
+**Unmanaged files** are every other top-level `*.zim`: names that aren't a DNS label, such as `wikipedia_en_100_2025-10.zim`. They are served as is. A file that fails `kiwix-manage add` (libzim rejects truncated files) is listed in `status.unmanagedFiles` with its error and not served. `status.unmanagedFiles` lists only those failures; a healthy unmanaged file is served and not listed. A file named like a DNS label but longer than 45 characters (46 to 63) cannot be an archive's file, so it is also an unmanaged file: served silently when it is healthy, listed only if it fails. The librarian scans `/data` at startup.
 
 **The manifest** (`/data/.librarian/manifest.json`, written temp + fsync of the file and its directory + rename) records:
 - **every served book**, managed and unmanaged, as its full `<book>` element from `kiwix-manage add`, with the `path` rewritten to the absolute `/data/<file>`. kiwix-serve trusts `library.xml` for every attribute (title, language, name, flavour, tags, favicon), and `kiwix-manage` writes paths relative to its scratch library;
@@ -273,9 +299,9 @@ No `status.phase` field (Kubernetes API conventions discourage it).
 
 It supplies the health-gate baseline; `status.current` mirrors it. If it is lost, it is rebuilt from disk by the name rule. Registrations are then lost, and in-flight attempts fail and retry. **Disk wins over the manifest:** each scan reads the 16-byte header UUID of every managed file and corrects the manifest when they disagree.
 
-**Rebuilding a ZIM by hand** (for example from kept WARCs) is out of scope for the operator. The documented procedure is: copy the new file into `/data/.librarian/staging/`, `mv` it over `/data/<archive>.zim`, then restart the kiwix pod so the startup scan picks it up. A `kubectl cp` straight into the served path is a non-atomic write and is not supported.
+**Rebuilding a ZIM by hand** (for example from kept WARCs) is out of scope for the operator. The documented procedure is: copy the new file into a directory of your own on the same volume that the librarian never reads or cleans, such as `/data/.rebuild/`, `mv` it from there over `/data/<archive>.zim` (a rename within one volume is atomic), then restart the kiwix pod so the startup scan picks it up. Never use `/data/.librarian/staged/` for this: the librarian's garbage collection deletes any file there that belongs to no registered attempt, at startup and hourly, so a copy in progress could be lost. A `kubectl cp` straight into the served path is a non-atomic write and is not supported.
 
-**Staging and WARC state** live under `/data/.librarian/`, which no glob reaches.
+**Staging and WARC state** live under `/data/.librarian/` (`staged/` for attempts' parts and partial files, `warcs/` for kept WARC tars), which no glob reaches.
 
 **Every `library.xml` write** goes through one serialized routine:
 
@@ -367,7 +393,7 @@ registered → receiving → staged → promoting → promoted | discarded | fai
 ```
 
 - **Uploads restart from zero** within the post-crawl budget; there is no upload resume.
-- **Part uploads** carry `Content-Length` and a declared `X-Content-SHA256` header; the librarian verifies the body against it. A PUT for a part already received answers 200 if the declared hash matches (so a retry after a lost response succeeds), 409 if it doesn't. The WARC tar is written once to `/output/warcs.tar` in scratch (size `scratch` for it), so its length and hash are known before upload and retries send identical bytes.
+- **Part uploads** carry `Content-Length` and a declared `X-Content-SHA256` header; the librarian verifies the body against it. A PUT for a part already received answers 200 if the declared hash matches (so a retry after a lost response succeeds), 409 if it doesn't. The WARC tar is written once to `/output/warcs.tar` in scratch (size `scratch` for it), so its length and hash are known before upload and retries send identical bytes. It holds only the `build/collections/*/archive` directories, which are the WARC files (see Crawl attempts).
 - **Download intent** (URL, sha256, `.part` path) is persisted, so HTTP Range resume survives a librarian restart.
 - **Attempt ID format:** 8 lowercase base32 characters. The Job name is `<archive>-<attemptID>`, at most 54 characters given the 45-character archive name limit.
 
@@ -381,10 +407,12 @@ Attempt kinds are `upload` (bytes arrive from a Job) and `fetch` (the librarian 
 | `GET /v1/attempts/<attempt>` | manager | admin token |
 | `POST /v1/attempts/<attempt>/promote`, `/discard` | manager | admin token |
 | `PUT /v1/attempts/<attempt>/parts/zim`, `/parts/warcs` | crawl Job's upload container | that attempt's token |
+| `GET /v1/archives/<archive>` | manager, on every reconcile, to mirror the archive's current book into status | admin token |
 | `POST /v1/archives/<archive>/adopt` `{file}` | manager | admin token |
 | `DELETE /v1/archives/<archive>?policy=Retain\|Delete` | manager | admin token |
 | `GET /v1/archives/<archive>/warcs` | manager, or a user via port-forward | admin token |
 | `GET /v1/library` | manager | admin token |
+| `GET /healthz/startup`, `GET /healthz/live` | kubelet probes | none |
 
 - **Path segments** (`<archive>`, `<attempt>`) must match `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$` before any filesystem use. Encoded slashes are rejected. `adoptFile` names use their own rule (above).
 - **Per-attempt upload token:** generated by the manager; only its hash is sent to and stored by the librarian. It lives in the attempt's Secret, which is mounted **only into the upload container**, never into zimit's.
@@ -396,18 +424,20 @@ Attempt kinds are `upload` (bytes arrive from a Job) and `fetch` (the librarian 
   - **Kiwix pod egress** (the librarian fetches user-supplied URLs and follows redirects to mirrors): DNS (UDP and TCP 53), and `0.0.0.0/0` except the private ranges below.
   - **Crawl pod egress:** DNS (UDP and TCP 53); the librarian port on this library's pod; and `0.0.0.0/0` except `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `100.64.0.0/10` and `169.254.0.0/16`. This mirrors the archiveteam convention (which allows only UDP 53) and stops a hostile page from reaching in-cluster services.
   - **Test-only flag:** `--crawl-egress-allow-cidrs` (default empty) adds CIDRs to both egress allow-lists. The kind e2e sets it, because its test site is served in-cluster.
+  - **Probe flag:** `--probe-allow-cidrs` (`PROBE_ALLOW_CIDRS`; chart value `probeAllowCIDRs`; default empty) adds an ingress rule that lets those CIDRs reach both kiwix pod ports, serve and librarian, for CNIs that filter kubelet probes through the policy. The kind e2e sets it to the kind docker subnet.
   - **IPv6:** the policies assume an IPv4-only cluster (see Open questions).
   - **Crawl and kiwix pods:** `automountServiceAccountToken: false`.
 - **Webhook URL:** set by whoever can edit the `KiwixLibrary`. That's the same trust as creating pods in its namespace, and in-cluster targets such as chaski must work, so the manager doesn't filter it.
 - **Crawl pod security (user decision, 2026-11-23: "root, but locked down"):**
   - zimit may run as root; it drops all capabilities, sets `allowPrivilegeEscalation: false`, uses `RuntimeDefault` seccomp, and is never `privileged`.
-  - The first implementation task runs a real crawl under these settings. If Chromium needs a specific capability, only that one is added back, as a fixed default in code, with the reason recorded here.
+  - **Probe result (2026-11-25, `docs/notes/zimit-locked-down.md`):** zimit 3.1.3 crawls and writes its ZIM with every capability dropped, so no capability is added back (`zimitExtraCapabilities` is empty in code). The probe also found that zimit's crawler defaults to `--diskUtilization 90` and exits before fetching anything on a volume over 90% full, and that the root-owned `0700` profile directories under `build/` are why only the WARC directories are tarred (below).
+  - The crawl pod sets `fsGroup: 1000`, so the non-root upload container can read what root zimit wrote on the scratch volume (new files inherit group 1000).
   - The upload container runs as non-root uid 1000 with the same restrictions.
 
 ### Disk space
 
 - Before accepting any part (the `.meta4` `<size>`, Content-Length, or the declared length), the librarian requires `free ≥ size + reserveSpace`. A refresh needs room for the current file and the new one at once. The librarian re-checks while writing and aborts at the reserve (`InsufficientSpace`).
-- Concurrency is enforced by the manager, which doesn't register attempts beyond `crawls.maxConcurrent` or `downloads.maxConcurrent`.
+- Concurrency is enforced by the manager, which doesn't register attempts beyond `crawls.maxConcurrent` or `downloads.maxConcurrent`. The librarian also enforces the fetch limit itself, with a semaphore sized by `--max-fetches` (`downloads.maxConcurrent`), as a second line of defense.
 - **Attempts expire:** each registration carries a deadline (crawl: the Job's deadline + 1 h; fetch: 24 h). The librarian discards any non-terminal attempt past its deadline. The manager also calls `/discard` as soon as a Job is terminal with nothing staged, and `DELETE /v1/archives/<archive>` discards that archive's attempts.
 - **Garbage collection** at startup and hourly: staged and `.part` files whose attempt is unregistered, expired, or terminal for more than 7 days, are deleted. They are the librarian's own temporary files, never served data.
 - `status.freeBytes` and `Degraded/LowSpace` (below 2 × `reserveSpace`) report it.
@@ -424,9 +454,9 @@ Attempt kinds are `upload` (bytes arrive from a Job) and `fetch` (the librarian 
 - **zimit arguments:** `--name <archive> --output /output --build /output/build`. `--build` keeps the WARCs in a normal directory instead of zimit's root-only `0700` temp directory, so the non-root upload container can read them. The upload container requires exactly one `*.zim` in `/output` and fails otherwise.
 - **Scratch:** a generic ephemeral volume (`scratch.size`), plus a memory `emptyDir` at `/dev/shm`, because Chromium needs more than 64 Mi.
 - **`customCss`** exists because the first real archive needed it: the ARM reference's takedown banner and its non-working search box were hidden with CSS. (Pagefind's engine files load only when someone types, so no crawl captures them.) The operator writes it to a per-attempt ConfigMap owned by the Job and passes `--custom-css <path>`.
-- **Upload:** streams each part and retries with exponential backoff (capped at 5 min) until the post-crawl budget runs out. A kiwix pod restart, for example during an operator release, therefore doesn't lose a finished crawl.
+- **Upload:** streams each part and retries with exponential backoff (capped at 5 min) until the post-crawl budget runs out. The upload container gets `--budget=5h --max-backoff=5m`, and the budget counts only time spent sleeping between retries, not transfer time. Worst-case backoff (5 h 05 m) then leaves about 55 minutes of transfer slack inside the Job's 6 h post-crawl window. A kiwix pod restart, for example during an operator release, therefore doesn't lose a finished crawl.
 - **A failed or timed-out attempt** notifies, keeps current, and retries per the due rules.
-- **`keepWarcs: true`** registers the attempt with parts `[zim, warcs]`; the upload container sends a tar of `/output/build` as the `warcs` part.
+- **`keepWarcs: true`** registers the attempt with parts `[zim, warcs]`; the upload container sends a tar of only the `build/collections/*/archive` directories (the WARC files) as the `warcs` part. The crawler leaves root-owned `0700` profile directories elsewhere under `build/`, which uid 1000 cannot read, so tarring the whole of `/output/build` would fail; an allowlist also survives any other root-only directory a future zimit leaves behind (`docs/notes/zimit-locked-down.md`).
   - **Promotion:** the tar moves to `/data/.librarian/warcs/<archive>.tar`, replacing the previous one. That's one WARC set per archive, matching the served ZIM, kept outside any glob and never served.
   - **Discard:** a discarded attempt discards its WARCs too.
   - **Disk:** the free-space check counts both parts.
@@ -449,9 +479,9 @@ Attempt kinds are `upload` (bytes arrive from a Job) and `fetch` (the librarian 
 `POST` to `KiwixLibrary.spec.notify.webhook.url` with `{"title","message"}`:
 - `arm-reference updated` / `3,540 pages, 48 MB (was 3,531)`
 - `arm-reference refresh rejected` / `12 pages vs 3,531 current (needs 80%); kept current`
-- `bg3-wiki failed` / `crawl Job failed: <termination message>`
+- `bg3-wiki failed` / `CrawlFailed: <termination message>`. A failure's message is `<Reason>: <message>`, where the reason is the Degraded reason (`CrawlFailed`, `UploadFailed`, `DownloadFailed`, and so on) and the message is the failing container's termination message or the librarian's error.
 
-Delivery is retried (manager flag `--webhook-retries`, default 3), then recorded as a Warning Event; it never blocks reconciliation. Every outcome is also an Event and a condition. `Unchanged` results never notify.
+Delivery is retried (manager flag `--webhook-retries`, default 3), then recorded as a Warning Event; it never blocks reconciliation. The webhook client does not follow redirects, because a followed 301, 302 or 303 would turn the POST into a body-less GET that reports success. A webhook that answers any 3xx therefore counts as a failed delivery. Every outcome is also an Event and a condition. `Unchanged` results never notify.
 
 ### Deletion and finalizers
 
@@ -490,14 +520,15 @@ Every behavior lands test-first.
   - manifest roll-forward for each crash point, using the header UUID;
   - attempt-state transitions, including a lost response and an idle disconnect;
   - mtime bump; Job naming; free-space arithmetic.
-- **envtest:**
+- **Controllers, on controller-runtime's fake client with testify** (the nextdns-operator convention; a ruling, because the first draft asked for envtest here):
   - both controllers;
   - attempt idempotency across manager restarts, including between Secret, registration and Job creation;
   - adoption ordering (never fetches while awaiting adoption);
   - Retain then re-create inherits the file;
   - finalizer behavior with a missing or unreachable library;
-  - duplicate claim rejection;
-  - CEL validation and immutability.
+  - duplicate claim rejection.
+  The kind e2e supplies the integration coverage a real API server would, at the cost of weaker integration coverage before it runs.
+- **envtest:** CEL validation, defaults and immutability of the two CRDs only.
 - **Librarian integration** against a real kiwix-serve from the operator image:
   - zero-book start; startup never blocked by recovery;
   - library of 15+ books with confirmation by book id;
@@ -531,7 +562,7 @@ Every behavior lands test-first.
 
 ## Left to the builder
 
-- **To settle in the plan (design gate pass 3, lower severity):** confirmation of adoption by `/content/` link (applied above, test it); the Cilium vs kind NetworkPolicy semantics for `ipBlock` and in-cluster IPs; a watch-topology section (which resources each controller watches and maps back); `Queued` doesn't consume `requestedAt`; DNS-label files that can't be claimed (46–63 characters, or rejected by `kiwix-manage`) are listed in `status.unmanagedFiles`.
+- **To settle in the plan (design gate pass 3, lower severity):** confirmation of adoption by `/content/` link (applied above, test it); the Cilium vs kind NetworkPolicy semantics for `ipBlock` and in-cluster IPs; a watch-topology section (which resources each controller watches and maps back); `Queued` doesn't consume `requestedAt`; DNS-label files that can't be claimed (46–63 characters, or rejected by `kiwix-manage`): as built, only those `kiwix-manage` rejects are listed in `status.unmanagedFiles`, and the 46–63-character ones are served silently.
 
 - Package layout inside `internal/`, and the manifest's JSON shape beyond the fields named here.
 - Requeue intervals and the cron library (it must support `timeZone`).
@@ -539,13 +570,14 @@ Every behavior lands test-first.
 
 ## Open questions and unverified claims
 
-- Whether zimit runs under the locked-down crawl settings without adding a capability back (first implementation task).
 - Whether `articleCount` tracks HTML pages for every zimit crawl (observed for one crawl). The size ratio is the backstop.
 - How warc2zim sets the FRONT_ARTICLE flag.
 - Whether headless Chromium's Private Network Access protections add anything beyond the egress policy.
 - Whether the cluster is IPv4-only (the NetworkPolicies assume it).
-- How Cilium treats kubelet probes under the kiwix pod's ingress policy.
+- How Cilium treats kubelet probes under the kiwix pod's ingress policy (`--probe-allow-cidrs` is the escape hatch if they are filtered).
 - The OPDS catalog API (`/catalog/v2`) has no published stability promise.
 - Native sidecar start ordering is documented Kubernetes behavior, not yet exercised on this cluster.
 
-Closed since the last revision: libzim rejects truncated ZIMs on open (libzim 9.5.0 `fileimpl.cpp` L227-231), so `kiwix-manage add` fails on them.
+Closed since the last revision:
+- libzim rejects truncated ZIMs on open (libzim 9.5.0 `fileimpl.cpp` L227-231), so `kiwix-manage add` fails on them;
+- zimit 3.1.3 runs under the locked-down crawl settings with no capability added back (probe of 2026-11-25, recorded under Crawl pod security).
