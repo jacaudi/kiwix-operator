@@ -27,7 +27,7 @@ The chart installs the KiwixLibrary and ZimArchive CRDs. Create a library, then 
       download:
         catalog:
           name: wikipedia_en_100
-          flavour: maxi
+          flavour: full
 
 For more examples, see:
   https://github.com/jacaudi/kiwix-operator/tree/main/config/samples
