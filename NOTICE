@@ -1,0 +1,8 @@
+kiwix-operator
+Copyright 2026 jacaudi
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+The container image redistributes the kiwix-tools 3.8.2 binaries (kiwix-serve
+and kiwix-manage) under the GNU General Public License v3.0 (GPL-3.0).
+Source code: https://github.com/kiwix/kiwix-tools
