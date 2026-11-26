@@ -1230,3 +1230,33 @@ func TestCrawlJobEndedWithInsufficientSpace(t *testing.T) {
 	assert.Equal(t, st.Error, za.Status.LastAttempt.Message)
 	assertArchiveCondition(t, za, v1alpha1.ConditionDegraded, metav1.ConditionTrue, v1alpha1.ReasonInsufficientSpace)
 }
+
+func TestSourceKindChangedMidAttemptFails(t *testing.T) {
+	flippedToDownload := withOpen(gatedSite(), libapi.KindUpload)
+	flippedToDownload.Status.LastAttempt.JobCreated = true
+	flippedToDownload.Spec.Source = v1alpha1.SourceSpec{Download: &v1alpha1.DownloadSource{URL: "https://example.org/site_2026-10.zim"}}
+	flippedToCrawl := withOpen(urlArchive(), libapi.KindFetch)
+	flippedToCrawl.Name = "site"
+	flippedToCrawl.Spec.Source = testCrawlArchive().Spec.Source
+	tests := []struct {
+		name   string
+		seed   *v1alpha1.ZimArchive
+		reason string
+	}{
+		{name: "crawl to download", seed: flippedToDownload, reason: v1alpha1.ReasonUploadFailed},
+		{name: "download to crawl", seed: flippedToCrawl, reason: v1alpha1.ReasonDownloadFailed},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newZAHarness(t, tt.seed)
+			h.attemptIn(tt.seed, libapi.StateReceiving)
+
+			h.reconcile(t, "site")
+
+			assert.Equal(t, []string{testAttempt}, h.librarian.discarded)
+			za := assertFinished(t, h, "site", v1alpha1.AttemptResultFailed, tt.reason)
+			assert.Equal(t, "source changed during the attempt", za.Status.LastAttempt.Message)
+			assert.Empty(t, h.jobs(t), "no Job is built from the edited spec")
+		})
+	}
+}

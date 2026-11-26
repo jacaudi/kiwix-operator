@@ -62,6 +62,10 @@ func (r *ZimArchiveReconciler) progress(ctx context.Context, za *v1alpha1.ZimArc
 	if err != nil {
 		return ctrl.Result{}, err
 	}
+	// An attempt is built from the spec it started under; once the source kind differs, nothing of it can be built or resumed.
+	if a := za.Status.LastAttempt; a.Kind != attemptKind(za) {
+		return r.discardAndFinish(ctx, za, lib, lc, before, failed(kindFailure(a.Kind), "source changed during the attempt"))
+	}
 	// The Job is read before the attempt: a Job that ended after its upload staged the ZIM then shows as staged, not as a failure.
 	job, err := r.crawlJob(ctx, za)
 	if err != nil {
