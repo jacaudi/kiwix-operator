@@ -1,6 +1,7 @@
 package librarian
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json/v2"
@@ -225,7 +226,7 @@ func TestPartPutHeaders(t *testing.T) {
 		{"upper-case hash", func(r *http.Request) { r.Header.Set("X-Content-SHA256", strings.ToUpper(goodSHA)) }, http.StatusBadRequest, libapi.CodeInvalid},
 		{"short hash", func(r *http.Request) { r.Header.Set("X-Content-SHA256", goodSHA[1:]) }, http.StatusBadRequest, libapi.CodeInvalid},
 		{"hash with suffix", func(r *http.Request) { r.Header.Set("X-Content-SHA256", goodSHA+"\n") }, http.StatusBadRequest, libapi.CodeInvalid},
-		{"no Content-Length", func(r *http.Request) { r.ContentLength = -1 }, http.StatusBadRequest, libapi.CodeInvalid},
+		{"chunked body", func(r *http.Request) { r.ContentLength = -1; r.Header.Del("Content-Length") }, http.StatusBadRequest, libapi.CodeInvalid},
 		{"no token", func(r *http.Request) { r.Header.Del("Authorization") }, http.StatusUnauthorized, libapi.CodeUnauthorized},
 		{"unknown part", func(r *http.Request) { r.URL.Path = "/v1/attempts/" + attA + "/parts/meta" }, http.StatusBadRequest, libapi.CodeInvalid},
 	}
@@ -235,6 +236,7 @@ func TestPartPutHeaders(t *testing.T) {
 			r := httptest.NewRequest(http.MethodPut, "/v1/attempts/"+attA+"/parts/zim", strings.NewReader("data"))
 			r.Header.Set("Authorization", "Bearer "+testToken)
 			r.Header.Set("X-Content-SHA256", goodSHA)
+			r.Header.Set("Content-Length", "4")
 			tc.edit(r)
 			w := httptest.NewRecorder()
 
@@ -247,10 +249,32 @@ func TestPartPutHeaders(t *testing.T) {
 	}
 }
 
+// TestPartPutRequiresContentLengthHeader sends a PUT with neither Content-Length nor Transfer-Encoding over a real connection, where Go's server reports ContentLength 0, not -1.
+func TestPartPutRequiresContentLengthHeader(t *testing.T) {
+	th := newTestHandler(t)
+	srv := httptest.NewServer(th)
+	t.Cleanup(srv.Close)
+	conn, err := net.Dial("tcp", srv.Listener.Addr().String())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	_, err = fmt.Fprintf(conn, "PUT /v1/attempts/%s/parts/zim HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer %s\r\nX-Content-SHA256: %s\r\n\r\n", attA, testToken, goodSHA)
+	require.NoError(t, err)
+	resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	var eb libapi.ErrorBody
+	require.NoError(t, json.UnmarshalRead(resp.Body, &eb))
+
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	assert.Equal(t, libapi.CodeInvalid, eb.Code)
+	assert.Empty(t, th.at.calls)
+}
+
 func TestPartPutPassesUploadToken(t *testing.T) {
 	th := newTestHandler(t)
 
-	w := do(th, http.MethodPut, "/v1/attempts/"+attA+"/parts/warcs", "data", "Authorization", "Bearer "+testToken, "X-Content-SHA256", goodSHA)
+	w := do(th, http.MethodPut, "/v1/attempts/"+attA+"/parts/warcs", "data", "Authorization", "Bearer "+testToken, "X-Content-SHA256", goodSHA, "Content-Length", "4")
 
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	assert.Equal(t, []string{"put " + attA + " warcs"}, th.at.calls)

@@ -183,7 +183,8 @@ func (s *server) putPart(w http.ResponseWriter, r *http.Request) {
 	case !sha256RE.MatchString(sha):
 		writeError(w, http.StatusBadRequest, libapi.CodeInvalid, "X-Content-SHA256 must be 64 lowercase hex characters")
 		return
-	case r.ContentLength < 0:
+	// A chunked body reports -1; a request with no length header at all reports 0, so the header itself must be there.
+	case r.ContentLength < 0 || len(r.Header.Values("Content-Length")) == 0:
 		writeError(w, http.StatusBadRequest, libapi.CodeInvalid, "Content-Length is required")
 		return
 	}
