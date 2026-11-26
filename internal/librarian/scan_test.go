@@ -47,7 +47,7 @@ func (f *fakeReader) Read(_ context.Context, zimPath string) (Book, error) {
 	if err != nil {
 		return Book{}, err
 	}
-	return Book{BookID: id, Path: zimPath, ArticleCount: 3, SizeKiB: 1, Element: `<book id="` + id + `"/>`}, nil
+	return Book{BookID: id, Path: zimPath, ArticleCount: 3, SizeKiB: 1, Element: `<book id="` + id + `" path="` + zimPath + `" date="2026-10-03"/>`}, nil
 }
 
 // place copies a fixture into dir under name and returns its path.

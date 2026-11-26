@@ -45,6 +45,8 @@ type Intent struct {
 	ExpectedCurrentBookID string `json:"expectedCurrentBookID,omitempty"`
 	NewBookID             string `json:"newBookID"`
 	Book                  Book   `json:"book"`
+	// Current is what the commit records, so a rolled-forward intent keeps the request's provenance.
+	Current ArchiveCurrent `json:"current"`
 }
 
 // AttemptRecord is one registered attempt and its progress.
