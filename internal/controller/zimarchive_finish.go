@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"path"
 	"slices"
+	"strings"
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -44,8 +45,22 @@ type outcome struct {
 	book        *libapi.BookInfo
 }
 
+// maxMessage bounds an attempt message: the API server rejects an Event note over 1024 characters, and Pushover's message limit is the same.
+const maxMessage = 800
+
+// boundMessage is the last non-empty line of msg, cut to maxMessage bytes at a rune boundary; log tails and termination messages end with the cause.
+func boundMessage(msg string) string {
+	lines := strings.Split(strings.TrimSpace(msg), "\n")
+	last := strings.TrimSpace(lines[len(lines)-1])
+	if len(last) <= maxMessage {
+		return last
+	}
+	return strings.ToValidUTF8(last[:maxMessage], "")
+}
+
+// failed is a failure outcome; its message is bounded here, where every failure message is captured.
 func failed(reason, msg string) outcome {
-	return outcome{result: v1alpha1.AttemptResultFailed, reason: reason, msg: msg}
+	return outcome{result: v1alpha1.AttemptResultFailed, reason: reason, msg: boundMessage(msg)}
 }
 
 // progress tracks the open attempt by its state in the librarian, which is authoritative, and finishes it once it has ended.
@@ -199,7 +214,7 @@ func (r *ZimArchiveReconciler) gateAndPromote(ctx context.Context, za *v1alpha1.
 		case err == nil:
 			return r.finish(ctx, za, lib, before, outcome{result: v1alpha1.AttemptResultSucceeded, book: &book})
 		case errors.Is(err, libclient.ErrDuplicateBook):
-			return r.discardAndFinish(ctx, za, lib, lc, before, outcome{result: v1alpha1.AttemptResultRejected, reason: v1alpha1.ReasonDuplicateBook, msg: err.Error()})
+			return r.discardAndFinish(ctx, za, lib, lc, before, outcome{result: v1alpha1.AttemptResultRejected, reason: v1alpha1.ReasonDuplicateBook, msg: boundMessage(err.Error())})
 		case !errors.Is(err, libclient.ErrCurrentChanged):
 			// Promote is idempotent, so the attempt stays staged and the retry promotes it.
 			return ctrl.Result{}, errors.Join(r.saveStatus(ctx, za, before), fmt.Errorf("promote attempt %s: %w", a.ID, err))

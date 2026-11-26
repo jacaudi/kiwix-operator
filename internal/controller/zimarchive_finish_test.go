@@ -1260,3 +1260,40 @@ func TestSourceKindChangedMidAttemptFails(t *testing.T) {
 		})
 	}
 }
+
+func TestFailureMessageIsBounded(t *testing.T) {
+	long := strings.Repeat("x", 2000)
+	tests := []struct {
+		name, termination, want string
+	}{
+		{name: "last line of a log tail", termination: "starting\nretrying\n\ncrawl died: out of memory\n", want: "crawl died: out of memory"},
+		{name: "one long line", termination: long, want: long[:800]},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			seed := withOpen(gatedSite(), libapi.KindUpload)
+			seed.Status.LastAttempt.JobCreated = true
+			h := newZAHarness(t, seed, crawlJobWith(seed, batchv1.JobFailed), crawlPod(seed, exited(1, tt.termination), corev1.ContainerState{}))
+			h.attemptIn(seed, libapi.StateReceiving)
+
+			h.reconcile(t, "site")
+
+			za := h.archive(t, "site")
+			assert.Equal(t, tt.want, za.Status.LastAttempt.Message)
+			for _, e := range h.events() {
+				assert.LessOrEqual(t, len(e), 1024, "an Event note over 1024 characters is rejected by the API server: %q", e)
+			}
+		})
+	}
+}
+
+func TestLibrarianFailureMessageIsBounded(t *testing.T) {
+	seed := withOpen(urlArchive(), libapi.KindFetch)
+	h := newZAHarness(t, seed)
+	st := h.attemptIn(seed, libapi.StateFailed)
+	st.Error = "first\n" + strings.Repeat("y", 2000)
+
+	h.reconcile(t, "file")
+
+	assert.Equal(t, strings.Repeat("y", 800), h.archive(t, "file").Status.LastAttempt.Message)
+}
