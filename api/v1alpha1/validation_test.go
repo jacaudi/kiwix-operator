@@ -374,6 +374,11 @@ func TestTimeoutFormat(t *testing.T) {
 		{"compound", "1h30m", false},
 		{"days", "2d", true},
 		{"bare-number", "30", true},
+		{"at-bound", "8760h", false},
+		{"over-bound", "8761h", true},
+		// These match the pattern but the Go type cannot decode them.
+		{"undecodable", "9999999h", true},
+		{"overflow", "99999999999999999999h", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

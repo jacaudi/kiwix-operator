@@ -102,6 +102,7 @@ type CrawlSource struct {
 	// +kubebuilder:default="48h"
 	// +kubebuilder:validation:Type=string
 	// +kubebuilder:validation:Pattern=`^([0-9]+(\.[0-9]+)?(ms|s|m|h))+$`
+	// +kubebuilder:validation:XValidation:rule="duration(self) <= duration('8760h')",message="timeout must be a duration of at most 8760h"
 	// +optional
 	Timeout metav1.Duration `json:"timeout,omitzero"`
 

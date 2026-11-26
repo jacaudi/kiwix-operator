@@ -228,6 +228,9 @@ spec:
                         description: Timeout is how long the crawl Job may run
                         pattern: ^([0-9]+(\.[0-9]+)?(ms|s|m|h))+$
                         type: string
+                        x-kubernetes-validations:
+                        - message: timeout must be a duration of at most 8760h
+                          rule: duration(self) <= duration('8760h')
                       title:
                         description: Title is the ZIM title
                         type: string
