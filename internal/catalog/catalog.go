@@ -17,12 +17,14 @@ import (
 )
 
 const (
-	requestTimeout = 30 * time.Second
 	// maxBodyBytes bounds what one catalog or meta4 response may make us read.
 	maxBodyBytes   = 16 << 20
 	acquisitionRel = "http://opds-spec.org/acquisition"
 	meta4Ext       = ".meta4"
 )
+
+// requestTimeout bounds each catalog request; a variable only so a test can shorten it.
+var requestTimeout = 30 * time.Second
 
 var (
 	// ErrNotFound means the catalog has no entry for the requested name and flavour.
@@ -49,7 +51,7 @@ type Entry struct {
 type Client struct {
 	// BaseURL is the catalog root, such as https://opds.library.kiwix.org.
 	BaseURL string
-	// HTTP defaults to a client with a 30 s timeout.
+	// HTTP defaults to http.DefaultClient; each request is bounded to 30 s either way.
 	HTTP *http.Client
 	// UserAgent is sent on every request when set.
 	UserAgent string
@@ -156,8 +158,10 @@ func newest(cands []candidate, name, flavour string) (candidate, error) {
 	return best, nil
 }
 
-// get issues a GET with the caller's context and hands the size-capped body to read.
+// get issues a GET bounded by requestTimeout and the caller's context, and hands the size-capped body to read.
 func (c *Client) get(ctx context.Context, rawURL string, read func(io.Reader) error) error {
+	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, http.NoBody)
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
@@ -167,7 +171,7 @@ func (c *Client) get(ctx context.Context, rawURL string, read func(io.Reader) er
 	}
 	hc := c.HTTP
 	if hc == nil {
-		hc = &http.Client{Timeout: requestTimeout}
+		hc = http.DefaultClient
 	}
 	resp, err := hc.Do(req)
 	if err != nil {

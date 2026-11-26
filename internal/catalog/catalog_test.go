@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -198,4 +200,28 @@ func TestParseMeta4Rejects(t *testing.T) {
 			require.Error(t, err)
 		})
 	}
+}
+
+// blockingTransport never answers; it returns when the request context ends.
+type blockingTransport struct{}
+
+func (blockingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	<-req.Context().Done()
+	return nil, req.Context().Err()
+}
+
+func TestLatestTimesOutWithInjectedHTTP(t *testing.T) {
+	old := requestTimeout
+	requestTimeout = 20 * time.Millisecond
+	t.Cleanup(func() { requestTimeout = old })
+
+	// The parent deadline is only a safety net so a missing timeout fails fast instead of hanging.
+	parent, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+
+	c := &Client{BaseURL: "https://catalog.test", HTTP: &http.Client{Transport: blockingTransport{}}}
+	_, err := c.Latest(parent, "x", "")
+
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.NoError(t, parent.Err(), "the per-request timeout must fire before the caller's deadline")
 }
