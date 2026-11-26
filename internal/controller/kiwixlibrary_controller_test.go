@@ -16,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -628,14 +629,15 @@ func TestReconcileMissingLibrary(t *testing.T) {
 	assert.Equal(t, ctrl.Result{}, res)
 }
 
+// The Service and the PVC are ones the operator made earlier, so they are updated, with the fields the cluster assigned kept.
 func TestUpdateLeavesUnmanagedFields(t *testing.T) {
 	created := metav1.NewTime(time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC))
 	svc := &corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{Name: "wiki", Namespace: "kiwix", CreationTimestamp: created},
+		ObjectMeta: metav1.ObjectMeta{Name: "wiki", Namespace: "kiwix", CreationTimestamp: created, OwnerReferences: []metav1.OwnerReference{*metav1.NewControllerRef(testLib(), v1alpha1.GroupVersion.WithKind("KiwixLibrary"))}},
 		Spec:       corev1.ServiceSpec{ClusterIP: "10.96.0.10", ClusterIPs: []string{"10.96.0.10"}},
 	}
 	pvc := &corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: "wiki-data", Namespace: "kiwix", CreationTimestamp: created},
+		ObjectMeta: metav1.ObjectMeta{Name: "wiki-data", Namespace: "kiwix", CreationTimestamp: created, Labels: podLabels(testLib())},
 		Spec: corev1.PersistentVolumeClaimSpec{
 			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
 			Resources:   corev1.VolumeResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("20Gi")}},
@@ -691,4 +693,44 @@ func TestReconcilePVCEmptyStorageClassIsUnset(t *testing.T) {
 	var pvc corev1.PersistentVolumeClaim
 	h.get(t, "wiki-data", &pvc)
 	assert.Nil(t, pvc.Spec.StorageClassName, "an empty class must not be sent as \"\", which binds no claim")
+}
+
+// foreignObjects are same-named objects in the library's namespace that the operator did not create.
+func foreignObjects() map[string]client.Object {
+	labels := map[string]string{"app": "other"}
+	return map[string]client.Object{
+		"Service": &corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{Name: "wiki", Namespace: "kiwix", Labels: labels},
+			Spec:       corev1.ServiceSpec{Ports: []corev1.ServicePort{{Name: "web", Port: 80, Protocol: corev1.ProtocolTCP}}},
+		},
+		"NetworkPolicy": &networkingv1.NetworkPolicy{
+			ObjectMeta: metav1.ObjectMeta{Name: "wiki-kiwix", Namespace: "kiwix", Labels: labels},
+			Spec:       networkingv1.NetworkPolicySpec{PodSelector: metav1.LabelSelector{MatchLabels: labels}},
+		},
+		"HTTPRoute": &gwapiv1.HTTPRoute{
+			ObjectMeta: metav1.ObjectMeta{Name: "wiki", Namespace: "kiwix", Labels: labels},
+			Spec:       gwapiv1.HTTPRouteSpec{Hostnames: []gwapiv1.Hostname{"victim.example.com"}},
+		},
+	}
+}
+
+func TestReconcileLeavesForeignObjectsAlone(t *testing.T) {
+	for name, obj := range foreignObjects() {
+		t.Run(name, func(t *testing.T) {
+			want := obj.DeepCopyObject().(client.Object)
+			h := newHarness(t, withRoute(testLib()), obj)
+
+			_, err := h.r.Reconcile(t.Context(), ctrl.Request{NamespacedName: key("wiki")})
+
+			require.Error(t, err, "an object the operator did not create must not be adopted")
+			got := obj.DeepCopyObject().(client.Object)
+			require.NoError(t, h.c.Get(t.Context(), client.ObjectKeyFromObject(want), got))
+			// The fake client stamps versions and kinds on what it stores; neither is a change to the object.
+			for _, o := range []client.Object{want, got} {
+				o.SetResourceVersion("")
+				o.GetObjectKind().SetGroupVersionKind(schema.GroupVersionKind{})
+			}
+			assert.Equal(t, want, got)
+		})
+	}
 }

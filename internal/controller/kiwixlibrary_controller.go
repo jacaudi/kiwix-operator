@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"maps"
 	"math"
@@ -113,6 +114,10 @@ func (r *KiwixLibraryReconciler) Reconcile(ctx context.Context, req ctrl.Request
 // apply creates or updates obj with the library's labels, as its controller when owned; mutate sets the fields the operator manages.
 func (r *KiwixLibraryReconciler) apply(ctx context.Context, lib *v1alpha1.KiwixLibrary, obj client.Object, owned bool, mutate func() error) error {
 	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, obj, func() error {
+		// An existing object is only updated if the operator made it for this library; a same-named object of anyone else is left as it is.
+		if owned && obj.GetResourceVersion() != "" && !metav1.IsControlledBy(obj, lib) {
+			return errors.New("it exists and is not controlled by this KiwixLibrary")
+		}
 		labels := obj.GetLabels()
 		if labels == nil {
 			labels = map[string]string{}
