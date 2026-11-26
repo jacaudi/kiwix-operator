@@ -46,6 +46,11 @@ func TestManifestRoundTrip(t *testing.T) {
 				Staged:      &book,
 				UpdatedAt:   time.Date(2026, 11, 25, 4, 5, 6, 0, time.UTC),
 			},
+			"ijklmnop": {
+				RegisterRequest: libapi.RegisterRequest{Archive: "a", Attempt: "ijklmnop", Kind: libapi.KindUpload, TokenHash: "h", Parts: []string{"zim", "warcs"}},
+				State:           libapi.StateReceiving,
+				Parts:           map[string]PartRecord{"zim": {SHA256: "def", Size: 5, Done: true}, "warcs": {}},
+			},
 		},
 	}
 	require.NoError(t, want.Save(dir))

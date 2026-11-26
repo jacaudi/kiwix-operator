@@ -53,7 +53,7 @@ type AttemptRecord struct {
 	State       string                `json:"state"`
 	Code        string                `json:"code,omitempty"`
 	Error       string                `json:"error,omitempty"`
-	Parts       map[string]PartRecord `json:"parts,omitempty"`
+	Parts       map[string]PartRecord `json:"partStates,omitempty"`
 	PartialPath string                `json:"partialPath,omitempty"`
 	Staged      *Book                 `json:"staged,omitempty"`
 	UpdatedAt   time.Time             `json:"updatedAt,omitzero"`

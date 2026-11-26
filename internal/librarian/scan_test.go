@@ -263,3 +263,34 @@ func TestScanMissingDataDir(t *testing.T) {
 }
 
 func mapKeys[V any](m map[string]V) []string { return slices.Sorted(maps.Keys(m)) }
+
+func TestScanCanonicalWinsDuplicateOverEarlierCopy(t *testing.T) {
+	dir := t.TempDir()
+	// "arm-reference (copy).zim" sorts before "arm-reference.zim".
+	place(t, dir, "arm-reference (copy).zim", "small-a.zim")
+	path := place(t, dir, "arm-reference.zim", "small-a.zim")
+	m := emptyManifest()
+	book := Book{BookID: uuidA, Path: path, ArticleCount: 3, SizeKiB: 1, Element: "kept"}
+	current := ArchiveCurrent{File: "arm-reference.zim", BookID: uuidA, ArticleCount: 3, SizeKiB: 1, SHA256: "abc", SourceVersion: "2026-11", SourceFingerprint: "catalog:arm/maxi"}
+	m.Books["arm-reference.zim"] = book
+	m.Archives["arm-reference"] = current
+
+	unmanaged, _ := scan(t, dir, newFakeReader(), m)
+
+	assert.Equal(t, []libapi.UnmanagedFile{{Name: "arm-reference (copy).zim", Error: "duplicate book id of arm-reference.zim"}}, unmanaged)
+	assert.Equal(t, current, m.Archives["arm-reference"])
+	assert.Equal(t, book, m.Books["arm-reference.zim"])
+	assert.Equal(t, []string{"arm-reference.zim"}, mapKeys(m.Books))
+}
+
+func TestScanDuplicateCanonicalSortedOrderWins(t *testing.T) {
+	dir := t.TempDir()
+	place(t, dir, "a.zim", "small-a.zim")
+	place(t, dir, "b.zim", "small-a.zim")
+	m := emptyManifest()
+
+	unmanaged, _ := scan(t, dir, newFakeReader(), m)
+
+	assert.Equal(t, []libapi.UnmanagedFile{{Name: "b.zim", Error: "duplicate book id of a.zim"}}, unmanaged)
+	assert.Equal(t, []string{"a"}, mapKeys(m.Archives))
+}

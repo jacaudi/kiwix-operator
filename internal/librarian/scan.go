@@ -1,6 +1,7 @@
 package librarian
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"maps"
@@ -18,24 +19,17 @@ type BookReader interface {
 	Read(ctx context.Context, zimPath string) (Book, error)
 }
 
-// Scan reconciles m with the top-level .zim files in dataDir, disk winning: unreadable and duplicate-ID files go to unmanaged and stay out of m.Books, pending unlinks are skipped, and m changes only when err is nil.
+// Scan reconciles m with the top-level .zim files in dataDir, disk winning and canonical files claiming book IDs first: unreadable and duplicate-ID files go to unmanaged and stay out of m.Books, pending unlinks are skipped, and m changes only when err is nil.
 func Scan(ctx context.Context, dataDir string, r BookReader, m *Manifest) (unmanaged []libapi.UnmanagedFile, changed bool, err error) {
 	entries, err := os.ReadDir(dataDir)
 	if err != nil {
 		return nil, false, fmt.Errorf("scan %s: %w", dataDir, err)
 	}
-	pending := m.PendingUnlinks
 	books := make(map[string]Book)
 	archives := make(map[string]ArchiveCurrent)
 	owner := make(map[string]string) // book ID -> file that holds it
 
-	// os.ReadDir sorts by name, which is the order duplicates are resolved in.
-	for _, e := range entries {
-		name := e.Name()
-		// DirEntry.Type comes from lstat semantics: symlinks and directories are not regular.
-		if !e.Type().IsRegular() || !strings.HasSuffix(name, ".zim") || slices.Contains(pending, name) {
-			continue
-		}
+	for _, name := range candidates(entries, m.PendingUnlinks) {
 		if err := ctx.Err(); err != nil {
 			return nil, false, err
 		}
@@ -88,4 +82,26 @@ func bookFor(ctx context.Context, r BookReader, m *Manifest, path, id string) (B
 	}
 	book.Path = path
 	return book, nil
+}
+
+// candidates lists the scannable .zim names, canonical files first so a copy sorting earlier cannot take an archive's book ID; each class is in name order.
+func candidates(entries []os.DirEntry, pending []string) []string {
+	var names []string
+	for _, e := range entries {
+		name := e.Name()
+		// DirEntry.Type comes from lstat semantics: symlinks and directories are not regular.
+		if e.Type().IsRegular() && strings.HasSuffix(name, ".zim") && !slices.Contains(pending, name) {
+			names = append(names, name)
+		}
+	}
+	// os.ReadDir sorts by name, and a stable sort keeps that order within each class.
+	slices.SortStableFunc(names, func(a, b string) int { return cmp.Compare(rank(a), rank(b)) })
+	return names
+}
+
+func rank(name string) int {
+	if _, ok := zim.IsCanonicalFile(name); ok {
+		return 0
+	}
+	return 1
 }
