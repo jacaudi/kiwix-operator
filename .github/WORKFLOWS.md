@@ -9,7 +9,7 @@ graph LR
     X -- yes --> B[build: multi-arch image<br/>ghcr.io/jacaudi/kiwix-operator:sha-*]
     B --> S[smoke: --version]
     S -- main --> R[release: release-please]
-    R -- release cut --> RI[release-image: vX.Y.Z, vX.Y, vX, latest]
+    R -- release cut --> RI[release-image: X.Y.Z, vX.Y.Z, vX.Y, vX, latest]
     RI --> RS[release-smoke]
     RS --> RC[release-chart: oci://ghcr.io/jacaudi/charts/kiwix-operator]
 ```
@@ -25,6 +25,12 @@ graph LR
 ## Test images from a branch
 
 Open a PR (a draft PR is enough). Every push to its branch then builds and smoke-tests `ghcr.io/jacaudi/kiwix-operator:sha-<short>`. Branches without an open PR run `test` only. For a one-off build, run **CI** manually with `workflow_dispatch` on the branch.
+
+## Fork pull requests
+
+`ci.yaml` triggers on `push` only, so a pull request from a fork gets no `ci` check. A maintainer either re-pushes the fork's branch to this repo, which runs `ci` on the push and reports it on the PR, or merges as admin.
+
+Adding `pull_request:` with a job-level `if` to cover forks is rejected: the skipped duplicate `ci` check counts as passing, so the required check could go green without running.
 
 ## Releases
 

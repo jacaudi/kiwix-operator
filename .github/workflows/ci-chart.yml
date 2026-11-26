@@ -118,9 +118,7 @@ jobs:
             echo "::error::appVersion ${app} != release ${CHART_VERSION}; refusing to publish a chart that renders the wrong image"
             exit 1
           fi
-          # ci-build tags releases v<semver>; appVersion is conventionally bare.
-          # Normalise so a bare 1.2.3 still resolves to the :v1.2.3 that exists.
-          case "${app}" in v*) ref="${IMAGE}:${app}" ;; *) ref="${IMAGE}:v${app}" ;; esac
+          ref="${IMAGE}:${app}"
           echo "chart appVersion: ${app}"
           echo "checking ${ref}"
           docker buildx imagetools inspect "${ref}" >/dev/null 2>&1 || {

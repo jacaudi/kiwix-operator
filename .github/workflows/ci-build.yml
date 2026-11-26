@@ -124,6 +124,7 @@ jobs:
           tags: |
             type=sha
             type=raw,priority=1000,value=latest,enable=${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') }}
+            type=semver,pattern={{version}},value=${{ inputs.version }}
             type=semver,pattern=v{{version}},value=${{ inputs.version }}
             type=semver,pattern=v{{major}}.{{minor}},value=${{ inputs.version }}
             type=semver,pattern=v{{major}},value=${{ inputs.version }}
