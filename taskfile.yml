@@ -55,6 +55,12 @@ tasks:
     cmds:
       - task: go:test
 
+  test:kiwix:
+    desc: Run the kiwix-tagged tests in an image that has kiwix-manage (needs docker; slow)
+    cmds:
+      - docker build -f test/kiwix.Dockerfile -t kiwix-operator-test:local .
+      - docker run --rm -v "$PWD:/src" -v kiwix-operator-gomod:/go/pkg/mod -w /src -e GOFLAGS=-buildvcs=false kiwix-operator-test:local go test -tags kiwix ./internal/librarian/... -race -v
+
   build:
     desc: Build the operator binary into ./bin/kiwix-operator
     cmds:
