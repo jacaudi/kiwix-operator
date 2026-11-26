@@ -36,15 +36,18 @@ import (
 )
 
 const (
-	// kindContext is the only kubeconfig context these tests may touch.
+	// kubeconfig is the only kubeconfig these tests read, and kindContext the only context they touch.
+	kubeconfig  = "/tmp/kiwix-e2e.kubeconfig"
 	kindContext = "kind-kiwix-e2e"
-	ns          = "kiwix-e2e"
-	toolsNS     = "kiwix-e2e-tools"
-	operatorNS  = "kiwix-system"
-	release     = "kiwix-operator"
-	libraryName = "library"
-	siteName    = "site"
-	bookName    = "book"
+	// diagnosticsMargin is kept free before the test deadline, so a failing wait still dumps diagnostics.
+	diagnosticsMargin = 3 * time.Minute
+	ns                = "kiwix-e2e"
+	toolsNS           = "kiwix-e2e-tools"
+	operatorNS        = "kiwix-system"
+	release           = "kiwix-operator"
+	libraryName       = "library"
+	siteName          = "site"
+	bookName          = "book"
 	// catalogBook is any name: the fake catalog answers every query with book-01.zim.
 	catalogBook = "e2e_book"
 	// catalogVersion is the month of the fake catalog entry's <updated>.
@@ -67,9 +70,10 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// setup refuses to run unless the loaded kubeconfig's current context is the kind cluster, then resolves the repo root.
+// setup refuses to run unless the e2e kubeconfig's current context is the kind cluster, then resolves the repo root.
 func setup() error {
-	raw, err := clientcmd.NewDefaultClientConfigLoadingRules().Load()
+	// ExplicitPath alone: neither $KUBECONFIG nor ~/.kube/config is ever read.
+	raw, err := (&clientcmd.ClientConfigLoadingRules{ExplicitPath: kubeconfig}).Load()
 	if err != nil {
 		return fmt.Errorf("load kubeconfig: %w", err)
 	}
@@ -131,7 +135,7 @@ func (e *env) setupLibrary(t *testing.T) {
 	_, err := kubectl(ctx, "apply", "-f", filepath.Join(repoRoot, "test/e2e/manifests/site.yaml"))
 	require.NoError(t, err)
 	for _, namespace := range []string{operatorNS, toolsNS, ns} {
-		_, err := kubectl(ctx, "wait", "--for=condition=Available", "deployment", "--all", "-n", namespace, "--timeout=5m")
+		_, err := kubectl(ctx, "wait", "--for=condition=Available", "deployment", "--all", "-n", namespace, "--timeout="+bound(t, 5*time.Minute).String())
 		require.NoError(t, err)
 	}
 
@@ -283,9 +287,9 @@ func (e *env) crawlEgressBlockedWithoutFlag(t *testing.T) {
 
 	subnet, err := exec.CommandContext(ctx, "docker", "network", "inspect", "kind", "-f", "{{(index .IPAM.Config 0).Subnet}}").Output()
 	require.NoError(t, err)
-	_, err = run(ctx, "helm", "upgrade", "--install", "--kube-context", kindContext, release, filepath.Join(repoRoot, "chart"),
+	_, err = run(ctx, "helm", "upgrade", "--install", "--kubeconfig", kubeconfig, "--kube-context", kindContext, release, filepath.Join(repoRoot, "chart"),
 		"-n", operatorNS, "-f", filepath.Join(repoRoot, "test/e2e/values-no-egress.yaml"),
-		"--set", "probeAllowCIDRs={"+strings.TrimSpace(string(subnet))+"}", "--wait", "--timeout=5m")
+		"--set", "probeAllowCIDRs={"+strings.TrimSpace(string(subnet))+"}", "--wait", "--timeout="+bound(t, 5*time.Minute).String())
 	require.NoError(t, err)
 	waitFor(t, 3*time.Minute, "the crawl policy to drop the allow CIDRs", func(ctx context.Context) error {
 		var np networkingv1.NetworkPolicy
@@ -298,7 +302,14 @@ func (e *env) crawlEgressBlockedWithoutFlag(t *testing.T) {
 		return nil
 	})
 
-	za := e.finishRequest(t, siteName, 15*time.Minute)
+	// A short crawl timeout bounds a zimit that hangs on the unreachable seed instead of exiting.
+	za, err := e.archive(ctx, siteName)
+	require.NoError(t, err)
+	patch := client.MergeFrom(za.DeepCopy())
+	za.Spec.Source.Crawl.Timeout = metav1.Duration{Duration: 3 * time.Minute}
+	require.NoError(t, e.c.Patch(ctx, za, patch))
+
+	za = e.finishRequest(t, siteName, 15*time.Minute)
 	a := za.Status.LastAttempt
 	require.Equal(t, v1alpha1.AttemptResultFailed, a.Result, a.Message)
 	require.Equal(t, v1alpha1.ReasonCrawlFailed, a.Reason)
@@ -383,17 +394,21 @@ func available(conds []metav1.Condition) error {
 	return nil
 }
 
-// get fetches path from a Service port through the API server's service proxy; a zero code means the request failed.
+// get fetches path from a Service port through the API server's service proxy and returns the HTTP status and body; an error means no response.
 func (e *env) get(ctx context.Context, namespace, svc string, port int, path string) (int, []byte, error) {
 	res := e.cs.CoreV1().RESTClient().Get().Namespace(namespace).Resource("services").
 		Name(fmt.Sprintf("%s:%d", svc, port)).SubResource("proxy").Suffix(path).Do(ctx)
-	var code int
-	res.StatusCode(&code)
 	body, err := res.Raw()
-	if code == 0 {
-		return 0, nil, err
+	if err == nil {
+		var code int
+		res.StatusCode(&code)
+		return code, body, nil
 	}
-	return code, body, nil
+	// A non-2xx response comes back as a StatusError, and Result.StatusCode stays 0 for it.
+	if status, ok := errors.AsType[*apierrors.StatusError](err); ok {
+		return int(status.ErrStatus.Code), body, nil
+	}
+	return 0, nil, err
 }
 
 // served reports whether kiwix-serve's catalog has the book.
@@ -461,9 +476,19 @@ func fixtureUUID(t *testing.T, file string) string {
 	return fixtures[i].UUID
 }
 
+// bound clamps d so it ends diagnosticsMargin before the test deadline; the go test timeout panic skips every cleanup.
+func bound(t *testing.T, d time.Duration) time.Duration {
+	if deadline, ok := t.Deadline(); ok {
+		// At least a second: helm reads a zero --timeout as no wait at all.
+		return max(min(d, time.Until(deadline)-diagnosticsMargin), time.Second)
+	}
+	return d
+}
+
 // waitFor polls cond until it returns nil, failing t with its last error after timeout.
 func waitFor(t *testing.T, timeout time.Duration, what string, cond func(context.Context) error) {
 	t.Helper()
+	timeout = bound(t, timeout)
 	var last error
 	err := wait.PollUntilContextTimeout(t.Context(), poll, timeout, true, func(ctx context.Context) (bool, error) {
 		last = cond(ctx)
@@ -477,7 +502,7 @@ func waitFor(t *testing.T, timeout time.Duration, what string, cond func(context
 // holdFor fails t as soon as cond returns an error during d.
 func holdFor(t *testing.T, d time.Duration, what string, cond func(context.Context) error) {
 	t.Helper()
-	err := wait.PollUntilContextTimeout(t.Context(), poll, d, true, func(context.Context) (bool, error) {
+	err := wait.PollUntilContextTimeout(t.Context(), poll, bound(t, d), true, func(context.Context) (bool, error) {
 		// t.Context, not the poll's, so a call in flight at the deadline is not read as a violation.
 		return false, cond(t.Context())
 	})
@@ -518,7 +543,7 @@ func (e *env) dump(t *testing.T) {
 }
 
 func kubectl(ctx context.Context, args ...string) (string, error) {
-	return run(ctx, "kubectl", append([]string{"--context", kindContext}, args...)...)
+	return run(ctx, "kubectl", append([]string{"--kubeconfig", kubeconfig, "--context", kindContext}, args...)...)
 }
 
 // run runs a command and returns its combined output, which the error carries too.
