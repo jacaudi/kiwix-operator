@@ -849,3 +849,34 @@ func TestAdoptedArchiveDoesNotRefetch(t *testing.T) {
 
 	assert.Empty(t, h.librarian.registered, "the adopted version is already the catalog's newest")
 }
+
+func TestUnreachableLibrarianKeepsStoredMessage(t *testing.T) {
+	h := newZAHarness(t, requested(stored(testCrawlArchive()), "r1"))
+	h.librarian.archiveErr = errors.New("dial tcp 10.0.0.1:41000: connection refused")
+	h.reconcile(t, "site")
+	first := meta.FindStatusCondition(h.archive(t, "site").Status.Conditions, v1alpha1.ConditionAvailable)
+	require.NotNil(t, first)
+
+	h.librarian.archiveErr = errors.New("dial tcp 10.0.0.1:41001: connection refused")
+	h.reconcile(t, "site")
+
+	second := meta.FindStatusCondition(h.archive(t, "site").Status.Conditions, v1alpha1.ConditionAvailable)
+	require.NotNil(t, second)
+	assert.Equal(t, first.Message, second.Message, "a changed port must not rewrite the message, which would re-trigger the reconcile")
+}
+
+func TestOpenAttemptUnreachableLibrarianKeepsStoredMessage(t *testing.T) {
+	seed := withOpen(urlArchive(), libapi.KindFetch)
+	h := newZAHarness(t, seed)
+	h.librarian.getErr = errors.New("dial tcp 10.0.0.1:41000: connection refused")
+	h.reconcile(t, "file")
+	first := meta.FindStatusCondition(h.archive(t, "file").Status.Conditions, v1alpha1.ConditionAvailable)
+	require.NotNil(t, first)
+
+	h.librarian.getErr = errors.New("dial tcp 10.0.0.1:41001: connection refused")
+	h.reconcile(t, "file")
+
+	second := meta.FindStatusCondition(h.archive(t, "file").Status.Conditions, v1alpha1.ConditionAvailable)
+	require.NotNil(t, second)
+	assert.Equal(t, first.Message, second.Message)
+}

@@ -40,7 +40,7 @@ func (r *ZimArchiveReconciler) start(ctx context.Context, za *v1alpha1.ZimArchiv
 		err = r.mirror(ctx, za, lc)
 	}
 	if err != nil {
-		setArchiveCondition(za, v1alpha1.ConditionAvailable, metav1.ConditionFalse, v1alpha1.ReasonLibraryUnavailable, err.Error())
+		setErrorCondition(za, v1alpha1.ConditionAvailable, metav1.ConditionFalse, v1alpha1.ReasonLibraryUnavailable, err.Error())
 		return ctrl.Result{RequeueAfter: statusPoll}, r.saveStatus(ctx, za, before)
 	}
 
@@ -88,7 +88,7 @@ func (r *ZimArchiveReconciler) startDue(ctx context.Context, za *v1alpha1.ZimArc
 
 	entry, unchanged, err := r.preCheck(ctx, za)
 	if err != nil {
-		setArchiveCondition(za, v1alpha1.ConditionDegraded, metav1.ConditionTrue, v1alpha1.ReasonCatalogLookupFailed, err.Error())
+		setErrorCondition(za, v1alpha1.ConditionDegraded, metav1.ConditionTrue, v1alpha1.ReasonCatalogLookupFailed, err.Error())
 		setIdle(za)
 		return ctrl.Result{RequeueAfter: catalogRetry}, r.saveStatus(ctx, za, before)
 	}

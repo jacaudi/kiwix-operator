@@ -92,7 +92,7 @@ func (r *ZimArchiveReconciler) progress(ctx context.Context, za *v1alpha1.ZimArc
 	case errors.Is(err, libclient.ErrNotFound):
 		return r.reRegister(ctx, za, lib, lc, before)
 	case err != nil:
-		setArchiveCondition(za, v1alpha1.ConditionAvailable, metav1.ConditionFalse, v1alpha1.ReasonLibraryUnavailable, err.Error())
+		setErrorCondition(za, v1alpha1.ConditionAvailable, metav1.ConditionFalse, v1alpha1.ReasonLibraryUnavailable, err.Error())
 		if r.now().After(a.Deadline.Add(unreachableGrace)) {
 			return r.finish(ctx, za, lib, before, failed(v1alpha1.ReasonLibraryUnavailable, "the librarian was unreachable past the attempt's deadline: "+err.Error()))
 		}

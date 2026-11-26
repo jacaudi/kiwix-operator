@@ -165,6 +165,14 @@ func setArchiveCondition(za *v1alpha1.ZimArchive, typ string, status metav1.Cond
 	})
 }
 
+// setErrorCondition sets a condition whose message is an error's text. It keeps the stored message while status and reason are unchanged, because transport detail such as a changing port would otherwise rewrite it on every reconcile and re-trigger the next one.
+func setErrorCondition(za *v1alpha1.ZimArchive, typ string, status metav1.ConditionStatus, reason, msg string) {
+	if c := meta.FindStatusCondition(za.Status.Conditions, typ); c != nil && c.Status == status && c.Reason == reason {
+		msg = c.Message
+	}
+	setArchiveCondition(za, typ, status, reason, msg)
+}
+
 // attemptOpen reports whether a is an attempt still in progress.
 func attemptOpen(a *v1alpha1.AttemptStatus) bool {
 	return a != nil && a.ID != "" && a.FinishedAt == nil
