@@ -802,3 +802,19 @@ func TestLibraryMapsToArchives(t *testing.T) {
 
 	assert.ElementsMatch(t, []reconcile.Request{{NamespacedName: key("site")}, {NamespacedName: key("docs")}}, got)
 }
+
+func TestQueuedCatalogArchiveSkipsCatalogLookup(t *testing.T) {
+	openFetch := func(name string) *v1alpha1.ZimArchive {
+		za := openCrawl(name)
+		za.Status.LastAttempt.Kind = libapi.KindFetch
+		return za
+	}
+	h := newZAHarness(t, requested(catalogArchive("x", "maxi"), "r1"), openFetch("a"), openFetch("b"))
+	h.catalog.entries = []string{"x/maxi/2026-10"}
+
+	res := h.reconcile(t, "docs")
+
+	assert.Equal(t, time.Minute, res.RequeueAfter)
+	assertArchiveCondition(t, h.archive(t, "docs"), v1alpha1.ConditionProgressing, metav1.ConditionTrue, v1alpha1.ReasonQueued)
+	assert.Zero(t, h.catalog.count(), "a queued archive must not query the catalog")
+}

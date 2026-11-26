@@ -24,6 +24,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	gwapiv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/jacaudi/kiwix-operator/api/v1alpha1"
@@ -653,4 +654,29 @@ func TestUpdateLeavesUnmanagedFields(t *testing.T) {
 	assert.Equal(t, resource.MustParse("20Gi"), gotPVC.Spec.Resources.Requests[corev1.ResourceStorage])
 	assert.Equal(t, "kiwix-operator", gotPVC.Labels["app.kubernetes.io/managed-by"])
 	assert.Empty(t, gotPVC.OwnerReferences)
+}
+
+func TestLibraryWatchIgnoresStatusOnlyUpdates(t *testing.T) {
+	old := testLib()
+	statusOnly := old.DeepCopy()
+	statusOnly.Status.FreeBytes = 123
+	statusOnly.ResourceVersion = "2"
+	specChanged := old.DeepCopy()
+	specChanged.Generation++
+
+	tests := []struct {
+		name string
+		new  *v1alpha1.KiwixLibrary
+		want bool
+	}{
+		{name: "status only", new: statusOnly, want: false},
+		{name: "spec changed", new: specChanged, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := specChangedOnly.Update(event.UpdateEvent{ObjectOld: old, ObjectNew: tt.new})
+
+			assert.Equal(t, tt.want, got)
+		})
+	}
 }

@@ -19,8 +19,10 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	gwapiv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/jacaudi/kiwix-operator/api/v1alpha1"
@@ -329,10 +331,13 @@ func degradedReason(lib *v1alpha1.KiwixLibrary, holder string, routeUnsupported 
 	return v1alpha1.ReasonHealthy, "no problem found"
 }
 
+// specChangedOnly drops update events that left the spec alone, so a status write never re-triggers the reconcile that made it.
+var specChangedOnly = predicate.GenerationChangedPredicate{}
+
 // SetupWithManager registers the controller; it watches HTTPRoutes only when the cluster serves them.
 func (r *KiwixLibraryReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	b := ctrl.NewControllerManagedBy(mgr).
-		For(&v1alpha1.KiwixLibrary{}).
+		For(&v1alpha1.KiwixLibrary{}, builder.WithPredicates(specChangedOnly)).
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Service{}).
 		Owns(&corev1.Secret{}).

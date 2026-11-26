@@ -74,6 +74,18 @@ func (r *ZimArchiveReconciler) start(ctx context.Context, za *v1alpha1.ZimArchiv
 
 // startDue runs the pre-check and the concurrency limit for a due archive, then creates the attempt.
 func (r *ZimArchiveReconciler) startDue(ctx context.Context, za *v1alpha1.ZimArchive, lib *v1alpha1.KiwixLibrary, lc ArchiveLibrarian, due schedule.Due, before *v1alpha1.ZimArchiveStatus) (ctrl.Result, error) {
+	// The concurrency check comes first so a queued archive never queries the public catalog.
+	kind := attemptKind(za)
+	n, err := r.openAttempts(ctx, za, kind)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if limit := concurrencyLimit(lib, kind); n >= int(limit) {
+		setArchiveCondition(za, v1alpha1.ConditionProgressing, metav1.ConditionTrue, v1alpha1.ReasonQueued,
+			fmt.Sprintf("%d of %d %s attempts already running in KiwixLibrary %s", n, limit, kind, lib.Name))
+		return ctrl.Result{RequeueAfter: queuedRetry}, r.saveStatus(ctx, za, before)
+	}
+
 	entry, unchanged, err := r.preCheck(ctx, za)
 	if err != nil {
 		setArchiveCondition(za, v1alpha1.ConditionDegraded, metav1.ConditionTrue, v1alpha1.ReasonCatalogLookupFailed, err.Error())
@@ -84,17 +96,6 @@ func (r *ZimArchiveReconciler) startDue(ctx context.Context, za *v1alpha1.ZimArc
 	if unchanged {
 		r.recordUnchanged(za, due)
 		return ctrl.Result{}, r.saveStatus(ctx, za, before)
-	}
-
-	kind := attemptKind(za)
-	n, err := r.openAttempts(ctx, za, kind)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-	if limit := concurrencyLimit(lib, kind); n >= int(limit) {
-		setArchiveCondition(za, v1alpha1.ConditionProgressing, metav1.ConditionTrue, v1alpha1.ReasonQueued,
-			fmt.Sprintf("%d of %d %s attempts already running in KiwixLibrary %s", n, limit, kind, lib.Name))
-		return ctrl.Result{RequeueAfter: queuedRetry}, r.saveStatus(ctx, za, before)
 	}
 	return r.createAttempt(ctx, za, lib, lc, due, entry, before)
 }
