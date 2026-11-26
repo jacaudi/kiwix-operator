@@ -174,7 +174,7 @@ func stubManage(t *testing.T, script string, timeout time.Duration) KiwixManage 
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "kiwix-manage")
 	require.NoError(t, os.WriteFile(bin, []byte("#!/bin/sh\n"+script+"\n"), 0o600))
-	require.NoError(t, os.Chmod(bin, 0o700)) //nolint:gosec // the stub must be executable
+	require.NoError(t, os.Chmod(bin, 0o700))
 	return KiwixManage{Bin: bin, ScratchDir: dir, Timeout: timeout}
 }
 
