@@ -2,7 +2,7 @@
 Build controllers structure from flat values
 */}}
 {{- define "kiwix-operator.values.controllers" -}}
-{{- $image := printf "%s:%s" .Values.image.repository (.Values.image.tag | default .Chart.AppVersion) -}}
+{{- $image := printf "%s:%s" .Values.image.repository (.Values.image.tag | default (printf "v%s" .Chart.AppVersion)) -}}
 controllers:
   main:
     type: deployment
@@ -14,7 +14,7 @@ controllers:
       main:
         image:
           repository: {{ .Values.image.repository }}
-          tag: {{ .Values.image.tag | default .Chart.AppVersion | quote }}
+          tag: {{ .Values.image.tag | default (printf "v%s" .Chart.AppVersion) | quote }}
           pullPolicy: {{ .Values.image.pullPolicy }}
         args:
           - manager

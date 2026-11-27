@@ -113,7 +113,7 @@ common library. Defaults are in [`chart/values.yaml`](../chart/values.yaml).
 | Value | Default | Meaning |
 |---|---|---|
 | `image.repository` | `ghcr.io/jacaudi/kiwix-operator` | The operator image |
-| `image.tag` | chart `appVersion` | Also used for the librarian and upload containers |
+| `image.tag` | `v` + chart `appVersion` | Also used for the librarian and upload containers |
 | `image.pullPolicy` | `IfNotPresent` | |
 | `zimit.image` | digest-pinned zimit 3.1.3 | The crawl image |
 | `catalogURL` | `https://opds.library.kiwix.org` | Kiwix OPDS catalog root |

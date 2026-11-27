@@ -9,7 +9,7 @@ graph LR
     X -- yes --> B[build: multi-arch image<br/>ghcr.io/jacaudi/kiwix-operator:sha-*]
     B --> S[smoke: --version]
     S -- main --> R[release: release-please]
-    R -- release cut --> RI[release-image: X.Y.Z, vX.Y.Z, vX.Y, vX, latest]
+    R -- release cut --> RI[release-image: vX.Y.Z, vX.Y, vX, latest]
     RI --> RS[release-smoke]
     RS --> RC[release-chart: oci://ghcr.io/jacaudi/charts/kiwix-operator]
 ```

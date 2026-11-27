@@ -504,7 +504,7 @@ Cluster-scoped, like nextdns-operator:
 
 The Secret and ConfigMap informers are filtered by the label `app.kubernetes.io/managed-by: kiwix-operator`.
 
-**Images:** the operator image tag defaults to the chart's `appVersion` (as nextdns-operator does). The librarian and upload containers use the same value, passed to the manager as a flag, so the three can't drift apart. The zimit image is a separate, digest-pinned flag.
+**Images:** the operator image tag defaults to `v` + the chart's `appVersion` (chart `0.1.0` runs image `v0.1.0`; image tags are v-prefixed, chart versions are bare). The librarian and upload containers use the same value, passed to the manager as a flag, so the three can't drift apart. The zimit image is a separate, digest-pinned flag.
 
 ## Tests (TDD)
 

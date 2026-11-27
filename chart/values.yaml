@@ -1,7 +1,7 @@
 # kiwix-operator Helm chart, built on the bjw-s common library.
 #
 # global: passed through to bjw-s common.
-# image: the operator image; tag "" means the chart appVersion. The manager runs it and passes the same
+# image: the operator image; tag "" means "v" + the chart appVersion (chart 0.1.0 runs image v0.1.0). The manager runs it and passes the same
 #   repository:tag as --operator-image, so the librarian and crawl upload containers never drift from it.
 # zimit.image: the crawl image, pinned by digest.
 # catalogURL: the Kiwix OPDS catalog root that catalog downloads resolve against.

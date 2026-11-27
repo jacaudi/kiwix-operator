@@ -118,7 +118,7 @@ jobs:
             echo "::error::appVersion ${app} != release ${CHART_VERSION}; refusing to publish a chart that renders the wrong image"
             exit 1
           fi
-          ref="${IMAGE}:${app}"
+          ref="${IMAGE}:v${app#v}"
           echo "chart appVersion: ${app}"
           echo "checking ${ref}"
           docker buildx imagetools inspect "${ref}" >/dev/null 2>&1 || {
@@ -140,6 +140,7 @@ jobs:
         run: |
           set -euo pipefail
           name=$(yq '.name' "${CHART_PATH}/Chart.yaml")
+          CHART_VERSION="${CHART_VERSION#v}"
           helm package "${CHART_PATH}" --version "${CHART_VERSION}" --destination /tmp
           helm push "/tmp/${name}-${CHART_VERSION}.tgz" "${REGISTRY}"
           echo "chart=${REGISTRY}/${name}:${CHART_VERSION}" >> "$GITHUB_OUTPUT"
