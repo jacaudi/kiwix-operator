@@ -880,3 +880,17 @@ func TestOpenAttemptUnreachableLibrarianKeepsStoredMessage(t *testing.T) {
 	require.NotNil(t, second)
 	assert.Equal(t, first.Message, second.Message)
 }
+
+func TestErrorConditionMessageRefreshesAfterSpecEdit(t *testing.T) {
+	za := testCrawlArchive()
+	za.Generation = 1
+	setErrorCondition(za, v1alpha1.ConditionDegraded, metav1.ConditionTrue, v1alpha1.ReasonCatalogLookupFailed, "no catalog entry named foo")
+
+	za.Generation = 2
+	setErrorCondition(za, v1alpha1.ConditionDegraded, metav1.ConditionTrue, v1alpha1.ReasonCatalogLookupFailed, "no catalog entry named bar")
+
+	c := meta.FindStatusCondition(za.Status.Conditions, v1alpha1.ConditionDegraded)
+	require.NotNil(t, c)
+	assert.Equal(t, "no catalog entry named bar", c.Message, "a spec edit must refresh the message even when status and reason are unchanged")
+	assert.Equal(t, int64(2), c.ObservedGeneration)
+}
