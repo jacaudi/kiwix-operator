@@ -3,8 +3,8 @@ apiVersion: v2
 name: kiwix-operator
 description: A Kubernetes operator that serves Kiwix ZIM libraries, crawls sites with zimit and refreshes catalog downloads
 type: application
-version: 0.0.0 # x-release-please-version
-appVersion: "0.0.0" # x-release-please-version
+version: 1.0.0 # x-release-please-version
+appVersion: "1.0.0" # x-release-please-version
 kubeVersion: ">=1.31.0-0"
 keywords:
   - kiwix
