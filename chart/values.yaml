@@ -21,7 +21,7 @@ image:
   pullPolicy: IfNotPresent
 
 zimit:
-  image: ghcr.io/openzim/zimit:3.1.3@sha256:264d386152a0527d75b562298193d27c7f318ee58eb5191940dc12ad0a1b121b
+  image: ghcr.io/openzim/zimit:3.2.0@sha256:7d2d7f6a20d9d1a35e805e4b5abc494a622ab8572b39546503ad111d2005a6af
 
 catalogURL: https://opds.library.kiwix.org
 
