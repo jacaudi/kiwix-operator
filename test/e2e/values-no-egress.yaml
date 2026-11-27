@@ -1,0 +1,9 @@
+# test/e2e/values.yaml without the crawl egress CIDRs, for the subtest that proves crawls cannot reach in-cluster sites without them.
+---
+image:
+  repository: kiwix-operator
+  tag: e2e
+
+catalogURL: http://fakecatalog.kiwix-e2e-tools.svc:8080
+
+crawlEgressAllowCIDRs: []

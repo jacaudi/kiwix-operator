@@ -1,0 +1,491 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: zimarchives.kiwix.jacaudi.dev
+spec:
+  group: kiwix.jacaudi.dev
+  names:
+    kind: ZimArchive
+    listKind: ZimArchiveList
+    plural: zimarchives
+    singular: zimarchive
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.libraryRef.name
+      name: Library
+      type: string
+    - jsonPath: .status.current.sourceVersion
+      name: Version
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="Available")].status
+      name: Available
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: ZimArchive is the Schema for the zimarchives API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: ZimArchiveSpec defines the desired state of ZimArchive
+            properties:
+              adoptFile:
+                description: AdoptFile names an unmanaged file in the library to adopt
+                  as the first version
+                type: string
+              deletionPolicy:
+                default: Retain
+                description: DeletionPolicy says what happens to the file when the
+                  archive is deleted
+                enum:
+                - Retain
+                - Delete
+                type: string
+              libraryRef:
+                description: LibraryRef names the KiwixLibrary in the same namespace;
+                  it cannot change after creation
+                properties:
+                  name:
+                    default: ""
+                    description: |-
+                      Name of the referent.
+                      This field is effectively required, but due to backwards compatibility is
+                      allowed to be empty. Instances of this type with an empty value here are
+                      almost certainly wrong.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
+                x-kubernetes-validations:
+                - message: libraryRef is immutable
+                  rule: self == oldSelf
+                - message: libraryRef.name must not be empty
+                  rule: self.name.size() > 0
+              notify:
+                default: {}
+                description: Notify configures notifications for this archive
+                properties:
+                  onSuccess:
+                    description: OnSuccess also notifies when a refresh succeeds
+                    type: boolean
+                type: object
+              refresh:
+                default: {}
+                description: Refresh configures scheduled refreshes and the health
+                  gate
+                properties:
+                  minArticleRatio:
+                    default: 80
+                    description: MinArticleRatio is the smallest article count, as
+                      a percent of the current version, a refresh may have
+                    format: int32
+                    maximum: 100
+                    minimum: 0
+                    type: integer
+                  minSizeRatio:
+                    default: 80
+                    description: MinSizeRatio is the smallest file size, as a percent
+                      of the current version, a refresh may have
+                    format: int32
+                    maximum: 100
+                    minimum: 0
+                    type: integer
+                  schedule:
+                    description: Schedule is a cron expression; empty means no scheduled
+                      refresh
+                    type: string
+                  timeZone:
+                    description: TimeZone is the IANA time zone the schedule is evaluated
+                      in
+                    type: string
+                type: object
+              source:
+                description: Source says where the ZIM comes from
+                properties:
+                  crawl:
+                    description: Crawl builds the ZIM from a website
+                    properties:
+                      customCss:
+                        description: CustomCSS is CSS injected into the ZIM
+                        type: string
+                      keepWarcs:
+                        description: KeepWarcs keeps the WARC files after the crawl
+                        type: boolean
+                      resources:
+                        description: Resources are the crawl container's resource
+                          requirements
+                        properties:
+                          claims:
+                            description: |-
+                              Claims lists the names of resources, defined in spec.resourceClaims,
+                              that are used by this container.
+
+                              This field depends on the
+                              DynamicResourceAllocation feature gate.
+
+                              This field is immutable. It can only be set for containers.
+                            items:
+                              description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                              properties:
+                                name:
+                                  description: |-
+                                    Name must match the name of one entry in pod.spec.resourceClaims of
+                                    the Pod where this field is used. It makes that resource available
+                                    inside a container.
+                                  type: string
+                                request:
+                                  description: |-
+                                    Request is the name chosen for a request in the referenced claim.
+                                    If empty, everything from the claim is made available, otherwise
+                                    only the result of this request.
+                                  type: string
+                              required:
+                              - name
+                              type: object
+                            type: array
+                            x-kubernetes-list-map-keys:
+                            - name
+                            x-kubernetes-list-type: map
+                          limits:
+                            additionalProperties:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            description: |-
+                              Limits describes the maximum amount of compute resources allowed.
+                              More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                            type: object
+                          requests:
+                            additionalProperties:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            description: |-
+                              Requests describes the minimum amount of compute resources required.
+                              If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                              otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                              More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                            type: object
+                        type: object
+                      scopeExcludeRx:
+                        description: ScopeExcludeRx is a regular expression for URLs
+                          the crawl must skip
+                        type: string
+                      scratch:
+                        default: {}
+                        description: Scratch is the temporary volume the crawl writes
+                          to
+                        properties:
+                          size:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            default: 20Gi
+                            description: Size is the capacity of the scratch volume
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
+                          storageClassName:
+                            description: StorageClassName is the class of the scratch
+                              volume
+                            type: string
+                        type: object
+                      seeds:
+                        description: Seeds are the URLs the crawl starts from
+                        items:
+                          type: string
+                        minItems: 1
+                        type: array
+                      sitemap:
+                        description: Sitemap is a sitemap URL to seed the crawl from
+                        type: string
+                      timeout:
+                        default: 48h
+                        description: Timeout is how long the crawl Job may run
+                        pattern: ^([0-9]+(\.[0-9]+)?(ms|s|m|h))+$
+                        type: string
+                        x-kubernetes-validations:
+                        - message: timeout must be a duration of at most 8760h
+                          rule: duration(self) <= duration('8760h')
+                      title:
+                        description: Title is the ZIM title
+                        type: string
+                      workers:
+                        default: 4
+                        description: Workers is the number of parallel crawl workers
+                        format: int32
+                        maximum: 16
+                        minimum: 1
+                        type: integer
+                    required:
+                    - seeds
+                    type: object
+                  download:
+                    description: Download fetches a prebuilt ZIM
+                    properties:
+                      catalog:
+                        description: Catalog selects a book from the Kiwix catalog
+                        properties:
+                          flavour:
+                            description: Flavour is the catalog flavour, such as maxi
+                              or nopic
+                            type: string
+                          name:
+                            description: Name is the catalog book name
+                            type: string
+                        required:
+                        - name
+                        type: object
+                      sha256:
+                        description: SHA256 is the expected digest of the file at
+                          URL
+                        pattern: ^[0-9a-f]{64}$
+                        type: string
+                      url:
+                        description: URL is a direct link to a ZIM file
+                        minLength: 1
+                        type: string
+                    type: object
+                    x-kubernetes-validations:
+                    - message: exactly one of catalog or url must be set
+                      rule: has(self.catalog) != has(self.url)
+                    - message: sha256 is only valid with url
+                      rule: '!has(self.sha256) || has(self.url)'
+                type: object
+                x-kubernetes-validations:
+                - message: exactly one of crawl or download must be set
+                  rule: has(self.crawl) != has(self.download)
+            required:
+            - libraryRef
+            - source
+            type: object
+          status:
+            description: ZimArchiveStatus defines the observed state of ZimArchive
+            properties:
+              adoptMissingNotified:
+                description: AdoptMissingNotified records that the missing adoptFile
+                  notification went out
+                type: boolean
+              conditions:
+                description: Conditions represent the latest available observations
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              current:
+                description: Current is the version the library serves
+                properties:
+                  articleCount:
+                    description: ArticleCount is the number of articles in the file
+                    format: int64
+                    type: integer
+                  bookId:
+                    description: BookID is the ZIM UUID in dashed lowercase form
+                    type: string
+                  file:
+                    description: File is the ZIM file name
+                    type: string
+                  promotedAt:
+                    description: PromotedAt is when the file became current
+                    format: date-time
+                    type: string
+                  sha256:
+                    description: SHA256 is the digest of the file
+                    type: string
+                  sizeKiB:
+                    description: SizeKiB is the file size in KiB
+                    format: int64
+                    type: integer
+                  sourceFingerprint:
+                    description: SourceFingerprint identifies where the version came
+                      from
+                    type: string
+                  sourceVersion:
+                    description: SourceVersion is the source's version as YYYY-MM
+                    type: string
+                required:
+                - bookId
+                - file
+                type: object
+              failedAttempts:
+                description: FailedAttempts counts consecutive failed attempts
+                format: int32
+                type: integer
+              finalizerFirstFailureAt:
+                description: FinalizerFirstFailureAt is when deletion first failed
+                  or stayed pending
+                format: date-time
+                type: string
+              lastAttempt:
+                description: LastAttempt is the open or most recently finished attempt
+                properties:
+                  deadline:
+                    description: Deadline is when the attempt is abandoned
+                    format: date-time
+                    type: string
+                  finishedAt:
+                    description: FinishedAt is when the attempt ended; nil while it
+                      is open
+                    format: date-time
+                    type: string
+                  id:
+                    description: ID is the attempt ID; empty when the attempt ended
+                      Unchanged
+                    type: string
+                  jobCreated:
+                    description: JobCreated records that the crawl Job exists
+                    type: boolean
+                  kind:
+                    description: Kind is "upload" for a crawl's result or "fetch"
+                      for a download
+                    type: string
+                  message:
+                    description: Message describes the outcome
+                    type: string
+                  notified:
+                    description: Notified records that this attempt's notification
+                      went out
+                    type: boolean
+                  reason:
+                    description: Reason is the condition reason for a failed or rejected
+                      attempt
+                    type: string
+                  requestedAt:
+                    description: RequestedAt is the requestedAt annotation value that
+                      started the attempt
+                    type: string
+                  result:
+                    description: Result is the outcome once the attempt has ended
+                    type: string
+                  scheduleTick:
+                    description: ScheduleTick is the schedule tick that started the
+                      attempt
+                    format: date-time
+                    type: string
+                  sourceVersion:
+                    description: SourceVersion is the catalog version a catalog fetch
+                      downloads, as YYYY-MM
+                    type: string
+                  startedAt:
+                    description: StartedAt is when the attempt began
+                    format: date-time
+                    type: string
+                  trigger:
+                    description: Trigger is "initial", "schedule", "requested" or
+                      "backoff"
+                    type: string
+                required:
+                - startedAt
+                type: object
+              lastFailureNotifiedAt:
+                description: LastFailureNotifiedAt is when the last failure notification
+                  went out
+                format: date-time
+                type: string
+              lastHandledRequestedAt:
+                description: LastHandledRequestedAt is the requestedAt annotation
+                  value last acted on
+                type: string
+              lastScheduledAt:
+                description: LastScheduledAt is the last schedule tick acted on
+                format: date-time
+                type: string
+              nextRefreshAt:
+                description: NextRefreshAt is when the next refresh is due
+                format: date-time
+                type: string
+              observedGeneration:
+                description: ObservedGeneration is the generation the status describes
+                format: int64
+                type: integer
+            type: object
+        required:
+        - spec
+        type: object
+        x-kubernetes-validations:
+        - message: name must be at most 45 characters
+          rule: self.metadata.name.size() <= 45
+        - message: name must be a DNS label
+          rule: self.metadata.name.matches('^[a-z0-9]([-a-z0-9]*[a-z0-9])?$')
+    served: true
+    storage: true
+    subresources:
+      status: {}

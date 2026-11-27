@@ -1,0 +1,11 @@
+# Chart values for task e2e: the locally built operator image, the in-cluster fake catalog, and crawl egress to kind's pod and service CIDRs.
+---
+image:
+  repository: kiwix-operator
+  tag: e2e
+
+catalogURL: http://fakecatalog.kiwix-e2e-tools.svc:8080
+
+crawlEgressAllowCIDRs:
+  - 10.244.0.0/16
+  - 10.96.0.0/12

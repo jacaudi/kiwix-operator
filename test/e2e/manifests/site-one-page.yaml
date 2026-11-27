@@ -1,0 +1,12 @@
+# Applied over site.yaml: the site's pages become one page with no links, so a refresh crawl finds a fraction of the articles.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: site-pages
+  namespace: kiwix-e2e
+data:
+  index.html: |
+    <!doctype html>
+    <html lang="en"><head><meta charset="utf-8"><title>E2E home</title></head>
+    <body><h1>E2E home</h1><p>The e2e site, down to its home page.</p></body></html>

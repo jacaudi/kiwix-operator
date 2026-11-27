@@ -1,0 +1,57 @@
+{{/*
+This template builds the full values structure from modular helpers
+and passes it to the bjw-s common library loader
+*/}}
+{{- /* bjw-s common >= 5.3.0 renders a Namespace from .Values.namespace; this dict bypasses the library defaults, so seed it. Helm owns the release namespace. */ -}}
+{{- $bjwsValues := dict "global" .Values.global "namespace" (dict "create" false) -}}
+
+{{/* Security/Pod Options */}}
+{{- $security := include "kiwix-operator.values.security" . | fromYaml -}}
+{{- if $security -}}
+  {{- $_ := set $bjwsValues "defaultPodOptions" $security.defaultPodOptions -}}
+{{- end -}}
+
+{{/* Controllers */}}
+{{- $controllers := include "kiwix-operator.values.controllers" . | fromYaml -}}
+{{- if $controllers -}}
+  {{- $_ := set $bjwsValues "controllers" $controllers.controllers -}}
+{{- end -}}
+
+{{/* Service */}}
+{{- $service := include "kiwix-operator.values.service" . | fromYaml -}}
+{{- if $service -}}
+  {{- $_ := set $bjwsValues "service" $service.service -}}
+{{- end -}}
+
+{{/* Service Account */}}
+{{- $serviceAccount := include "kiwix-operator.values.serviceaccount" . | fromYaml -}}
+{{- if $serviceAccount -}}
+  {{- $_ := set $bjwsValues "serviceAccount" $serviceAccount.serviceAccount -}}
+{{- end -}}
+
+{{/* RBAC */}}
+{{- $rbac := include "kiwix-operator.values.rbac" . | fromYaml -}}
+{{- if $rbac -}}
+  {{- $_ := set $bjwsValues "rbac" $rbac.rbac -}}
+{{- end -}}
+
+{{/* Initialize empty sections if not set */}}
+{{- if not (hasKey $bjwsValues "configMaps") -}}
+  {{- $_ := set $bjwsValues "configMaps" dict -}}
+{{- end -}}
+{{- if not (hasKey $bjwsValues "secrets") -}}
+  {{- $_ := set $bjwsValues "secrets" dict -}}
+{{- end -}}
+{{- if not (hasKey $bjwsValues "persistence") -}}
+  {{- $_ := set $bjwsValues "persistence" dict -}}
+{{- end -}}
+{{- if not (hasKey $bjwsValues "ingress") -}}
+  {{- $_ := set $bjwsValues "ingress" dict -}}
+{{- end -}}
+
+{{/* Create new context with constructed values */}}
+{{- $ctx := deepCopy . -}}
+{{- $_ := set $ctx "Values" $bjwsValues -}}
+
+{{/* Render all resources */}}
+{{ include "bjw-s.common.loader.all" $ctx }}

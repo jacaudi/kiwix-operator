@@ -1,0 +1,51 @@
+# kiwix-operator Helm chart, built on the bjw-s common library.
+#
+# global: passed through to bjw-s common.
+# image: the operator image; tag "" means "v" + the chart appVersion (chart 0.1.0 runs image v0.1.0). The manager runs it and passes the same
+#   repository:tag as --operator-image, so the librarian and crawl upload containers never drift from it.
+# zimit.image: the crawl image, pinned by digest.
+# catalogURL: the Kiwix OPDS catalog root that catalog downloads resolve against.
+# webhookRetries: times a failed webhook notification is retried.
+# crawlEgressAllowCIDRs: CIDRs added to the kiwix and crawl pods' internet egress rules.
+# probeAllowCIDRs: CIDRs allowed to reach both kiwix pod ports, for policy implementations that filter kubelet probes.
+# controller: replicas and update strategy; leader election is always on, so extra replicas stand by.
+# resources: the manager container's requests and limits.
+# serviceAccount: create it, or name an existing one, and its annotations.
+# rbac.enabled: render the ClusterRole and ClusterRoleBinding generated from the kubebuilder markers.
+---
+global: {}
+
+image:
+  repository: ghcr.io/jacaudi/kiwix-operator
+  tag: ""
+  pullPolicy: IfNotPresent
+
+zimit:
+  image: ghcr.io/openzim/zimit:3.1.3@sha256:264d386152a0527d75b562298193d27c7f318ee58eb5191940dc12ad0a1b121b
+
+catalogURL: https://opds.library.kiwix.org
+
+webhookRetries: 3
+
+crawlEgressAllowCIDRs: []
+
+probeAllowCIDRs: []
+
+controller:
+  replicas: 1
+  strategy: Recreate
+
+resources:
+  requests:
+    cpu: 10m
+    memory: 128Mi
+  limits:
+    memory: 256Mi
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+rbac:
+  enabled: true

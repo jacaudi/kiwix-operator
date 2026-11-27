@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<metalink xmlns="urn:ietf:params:xml:ns:metalink">
+  <generator>MirrorBrain/2.19.0</generator>
+  <origin dynamic="true">https://lb.download.kiwix.org/zim/devdocs/devdocs_en_go_2026-10.zim.meta4</origin>
+  <published>2026-11-26T06:22:35Z</published>
+  <publisher>
+    <name>Kiwix project</name>
+    <url>https://kiwix.org</url>
+  </publisher>
+
+  <file name="devdocs_en_go_2026-10.zim">
+    <size>1696105</size>
+
+    <!-- <mtime>1790958853</mtime> -->
+
+    <!-- internal id: 10359 -->
+    <hash type="md5">ad74b6889713027471e84a9490d91d58</hash>
+    <hash type="sha-1">e397e18cbedc07423a22a4a82ef732fca2dfb9f8</hash>
+    <hash type="sha-256">ce9ac3fa1b480e4707e53ecabb8b1e98764bd806cafb8d562bc15fe0e05accf8</hash>
+    <pieces length="4194304" type="sha-1">
+      <hash>e397e18cbedc07423a22a4a82ef732fca2dfb9f8</hash>
+    </pieces>
+
+
+    <!-- Found 7 mirrors: 0 in the same network prefix, 0 in the same autonomous system,
+         1 handling this country, 0 in the same region, 3 elsewhere -->
+
+    <!-- Mirrors in the same network (unknown): -->
+
+    <!-- Mirrors in the same AS (unknown): -->
+
+    <!-- Mirrors which handle this country (US): -->
+    <url location="us" priority="1">https://wi.mirror.driftle.ss/kiwix/zim/devdocs/devdocs_en_go_2026-10.zim</url>
+
+    <!-- Mirrors in the same continent (NA): -->
+
+    <!-- Mirrors in the rest of the world: -->
+    <url location="nl" priority="2">https://ftp.nluug.nl/pub/kiwix/zim/devdocs/devdocs_en_go_2026-10.zim</url>
+    <url location="fr" priority="3">https://mirror.download.kiwix.org/zim/devdocs/devdocs_en_go_2026-10.zim</url>
+    <url location="dk" priority="4">https://mirrors.dotsrc.org/kiwix/zim/devdocs/devdocs_en_go_2026-10.zim</url>
+  </file>
+</metalink>

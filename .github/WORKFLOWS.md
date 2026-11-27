@@ -1,0 +1,74 @@
+# CI/CD Workflows
+
+One orchestrator, [`ci.yaml`](workflows/ci.yaml), calls local reusable stages in this repo. Nothing is called across a repo boundary at runtime. The only required status check is **`ci`**.
+
+```mermaid
+graph LR
+    P[push, any branch] --> T[test: task ci + task test:kiwix]
+    T --> X{open PR, main,<br/>or dispatch?}
+    X -- yes --> B[build: multi-arch image<br/>ghcr.io/jacaudi/kiwix-operator:sha-*]
+    B --> S[smoke: --version]
+    S -- main --> R[release: release-please]
+    R -- release cut --> RI[release-image: vX.Y.Z, vX.Y, vX, latest]
+    RI --> RS[release-smoke]
+    RS --> RC[release-chart: oci://ghcr.io/jacaudi/charts/kiwix-operator]
+```
+
+| Stage | File | What it does |
+|---|---|---|
+| test | `ci-test.yml` | Runs `task ci` (actionlint, yamllint, hadolint, helm lint, golangci-lint, govulncheck, `go test -race`, the 70% coverage floor, the generated-artifact drift gate), then `task test:kiwix` (the `kiwix`-tagged tests in docker), `golangci-lint run --build-tags kiwix` and `hadolint test/kiwix.Dockerfile` |
+| build | `ci-build.yml` | Multi-arch (amd64, arm64) image pushed to GHCR and pinned by digest; stamps `VERSION`/`COMMIT`/`DATE` build args |
+| smoke | `ci-smoke.yml` | `task smoke`: boots the image and checks `--version` |
+| release | `ci-release.yml` | release-please: opens or updates the release PR, and tags when it merges |
+| release-chart | `ci-chart.yml` | Publishes the chart in lockstep with the app (chart version = tag) after checking that `appVersion` matches and the image exists |
+
+## Test images from a branch
+
+Open a PR (a draft PR is enough). Every push to its branch then builds and smoke-tests `ghcr.io/jacaudi/kiwix-operator:sha-<short>`. Branches without an open PR run `test` only. For a one-off build, run **CI** manually with `workflow_dispatch` on the branch.
+
+## Fork pull requests
+
+`ci.yaml` triggers on `push` only, so a pull request from a fork gets no `ci` check. A maintainer either re-pushes the fork's branch to this repo, which runs `ci` on the push and reports it on the PR, or merges as admin.
+
+Adding `pull_request:` with a job-level `if` to cover forks is rejected: the skipped duplicate `ci` check counts as passing, so the required check could go green without running.
+
+## Releases
+
+[release-please](https://github.com/googleapis/release-please) reads Conventional Commits on `main` and keeps a release PR open. Merging that PR tags `vX.Y.Z`, then publishes the image and the chart. The version lives in `.release-please-manifest.json`, and `chart/Chart.yaml` `version`/`appVersion` follow it through `# x-release-please-version` annotations.
+
+| Commit type | Bump | Changelog |
+|---|---|---|
+| `fix:`, `perf:`, `refactor:`, `deps:`, `revert:` | patch | visible |
+| `feat:` | minor | visible |
+| `feat!:` / `BREAKING CHANGE:` | **major**, even while 0.x: the next breaking change cuts `v1.0.0` (`bump-minor-pre-major: false`, the fleet setting) | visible |
+| `docs:`, `chore:`, `style:`, `test:`, `build:`, `ci:` | none | hidden |
+
+Renovate commits use the `deps:` prefix so dependency bumps cut a patch release. To force a version once, add a `Release-As: 1.0.0` footer to a commit. Never set `release-as` in the config: it overrides every later release.
+
+## Secrets
+
+| Secret | Used by | Why |
+|---|---|---|
+| `APP_ID`, `APP_PRIVATE_KEY` | release | A GitHub App token. `GITHUB_TOKEN` cannot trigger workflows, so without the App token the release PR never gets a `ci` run and can never merge. Not passed to build, smoke or chart: GHCR rejects App installation tokens, so registry pushes use `GITHUB_TOKEN` |
+
+## Local
+
+`task ci` plus `task test:kiwix` is what CI runs:
+
+```bash
+task ci          # everything
+task lint        # static checks only
+task test        # go test -race
+task test:kiwix  # kiwix-tagged tests in docker (slow)
+IMAGE=ghcr.io/jacaudi/kiwix-operator:sha-abc1234 task smoke
+```
+
+## The e2e is not in `ci`
+
+The `ci` check does not run the kind end-to-end tests (`test/e2e`, build tag `e2e`), so a green `ci` says nothing about them. Run them yourself before a release or a change to the chart, the controllers or the librarian:
+
+```bash
+task e2e         # needs docker, kind and helm; slow (up to 45 minutes)
+```
+
+`task e2e` builds the operator image, creates a throwaway kind cluster with its own kubeconfig (`/tmp/kiwix-e2e.kubeconfig`), installs the chart and deletes the cluster afterwards. It never touches your default kube context.

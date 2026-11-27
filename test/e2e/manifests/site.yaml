@@ -1,0 +1,77 @@
+# The e2e crawl target: the pinned nginx serving three linked pages from a ConfigMap at http://site.kiwix-e2e.svc.cluster.local/.
+# site-one-page.yaml replaces the pages with a single unlinked one.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kiwix-e2e
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: site-pages
+  namespace: kiwix-e2e
+data:
+  index.html: |
+    <!doctype html>
+    <html lang="en"><head><meta charset="utf-8"><title>E2E home</title></head>
+    <body><h1>E2E home</h1><p>Home page of the kiwix-operator e2e site.</p>
+    <ul><li><a href="/a.html">Page A</a></li><li><a href="/b.html">Page B</a></li></ul></body></html>
+  a.html: |
+    <!doctype html>
+    <html lang="en"><head><meta charset="utf-8"><title>Page A</title></head>
+    <body><h1>Page A</h1><p>First linked page of the e2e site.</p>
+    <a href="/">Home</a> <a href="/b.html">Page B</a></body></html>
+  b.html: |
+    <!doctype html>
+    <html lang="en"><head><meta charset="utf-8"><title>Page B</title></head>
+    <body><h1>Page B</h1><p>Second linked page of the e2e site.</p>
+    <a href="/">Home</a> <a href="/a.html">Page A</a></body></html>
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: site
+  namespace: kiwix-e2e
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: site
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: site
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: nginx
+          image: nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 80
+          readinessProbe:
+            httpGet:
+              path: /index.html
+              port: http
+          volumeMounts:
+            - name: pages
+              mountPath: /usr/share/nginx/html
+              readOnly: true
+      volumes:
+        - name: pages
+          configMap:
+            name: site-pages
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: site
+  namespace: kiwix-e2e
+spec:
+  selector:
+    app.kubernetes.io/name: site
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
