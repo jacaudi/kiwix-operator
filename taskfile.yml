@@ -79,7 +79,7 @@ tasks:
       - kind load docker-image --name kiwix-e2e kiwix-operator:e2e kiwix-e2e-tools:e2e
       - kubectl --kubeconfig /tmp/kiwix-e2e.kubeconfig --context kind-kiwix-e2e apply -f test/e2e/manifests/tools.yaml
       - helm upgrade --install --kubeconfig /tmp/kiwix-e2e.kubeconfig --kube-context kind-kiwix-e2e kiwix-operator chart -n kiwix-system --create-namespace -f test/e2e/values.yaml --set "probeAllowCIDRs={$(docker network inspect kind -f '{{"{{"}}(index .IPAM.Config 0).Subnet{{"}}"}}')}"
-      - go test -tags e2e ./test/e2e/... -v -timeout 45m
+      - go test -tags e2e -count=1 ./test/e2e/... -v -timeout 45m
 
   build:
     desc: Build the operator binary into ./bin/kiwix-operator
