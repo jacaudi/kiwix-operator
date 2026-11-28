@@ -5,9 +5,6 @@
     "github>jacaudi/renovate-config:go",
     "github>jacaudi/renovate-config:helm"
   ],
-  "semanticCommitType": "deps",
-  "semanticCommitScope": null,
-  "commitMessagePrefix": "deps:",
   "customManagers": [
     {
       "customType": "regex",
